@@ -56,7 +56,16 @@ io.on("connection", (socket) => {
   socket.on("join", async ({ nickname, room, adminPassword }, callback) => {
     const cleanNickname = cleanName(nickname);
     const cleanRoom = rooms.has(room) ? room : "accueil";
+    const wantsAdmin = Boolean(String(adminPassword || "").trim());
     const isAdmin = String(adminPassword || "") === ADMIN_PASSWORD;
+
+    if (wantsAdmin && !isAdmin) {
+      callback?.({
+        ok: false,
+        error: "Mot de passe admin incorrect.",
+      });
+      return;
+    }
 
     if (await isBanned(normalizeName(cleanNickname))) {
       callback?.({
@@ -135,10 +144,30 @@ io.on("connection", (socket) => {
         nickname: "Systeme",
         text:
           user.role === "admin"
-            ? "Commandes : /me texte, /clear, /kick pseudo, /ban pseudo, /unban pseudo"
-            : "Commandes : /me texte et /clear",
+            ? "Commandes admin : /me texte, /clear, /kick pseudo, /ban pseudo, /unban pseudo"
+            : "Commandes : /me texte, /clear, /admin motdepasse",
         createdAt: Date.now(),
       });
+      return;
+    }
+
+    if (messageText.startsWith("/admin ")) {
+      const password = messageText.slice(7).trim();
+
+      if (password !== ADMIN_PASSWORD) {
+        socket.emit("message", {
+          id: crypto.randomUUID(),
+          type: "system",
+          nickname: "Systeme",
+          text: "Mot de passe admin incorrect.",
+          createdAt: Date.now(),
+        });
+        return;
+      }
+
+      user.role = "admin";
+      await sendSystem(user.room, `${user.nickname} est maintenant admin.`);
+      publishUsers(user.room);
       return;
     }
 
