@@ -64,6 +64,19 @@
             <h2>Connectes</h2>
             <ul class="user-list" id="userList"></ul>
           </div>
+          <div class="admin-panel hidden" id="adminPanel">
+            <h2>Admin</h2>
+            <div class="admin-user-list" id="adminUserList"></div>
+            <form class="admin-unban-form" id="adminUnbanForm">
+              <input
+                id="adminUnbanInput"
+                maxlength="18"
+                autocomplete="off"
+                placeholder="Pseudo a debannir"
+              />
+              <button type="submit">Unban</button>
+            </form>
+          </div>
         </aside>
 
         <div class="conversation">

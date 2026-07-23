@@ -8,12 +8,18 @@ const messageInput = document.querySelector("#messageInput");
 const messages = document.querySelector("#messages");
 const roomList = document.querySelector("#roomList");
 const userList = document.querySelector("#userList");
+const adminPanel = document.querySelector("#adminPanel");
+const adminUserList = document.querySelector("#adminUserList");
+const adminUnbanForm = document.querySelector("#adminUnbanForm");
+const adminUnbanInput = document.querySelector("#adminUnbanInput");
 const roomName = document.querySelector("#roomName");
 const roomTopic = document.querySelector("#roomTopic");
 const leaveButton = document.querySelector("#leaveButton");
 
 let currentRoom = "accueil";
 let currentNickname = "";
+let currentRole = "user";
+let currentUsers = [];
 
 loginForm.addEventListener("submit", (event) => {
   event.preventDefault();
@@ -35,6 +41,7 @@ loginForm.addEventListener("submit", (event) => {
 
       currentRoom = response.room;
       currentNickname = response.nickname;
+      currentRole = response.role;
       showChat(response);
     }
   );
@@ -51,6 +58,18 @@ leaveButton.addEventListener("click", () => {
   window.location.reload();
 });
 
+adminUnbanForm.addEventListener("submit", (event) => {
+  event.preventDefault();
+  const nickname = adminUnbanInput.value.trim();
+  if (!nickname) return;
+
+  socket.emit("admin-action", {
+    action: "unban",
+    nickname,
+  });
+  adminUnbanInput.value = "";
+});
+
 socket.on("history", (history) => {
   messages.innerHTML = "";
   history.forEach(renderMessage);
@@ -63,6 +82,10 @@ socket.on("message", (message) => {
 });
 
 socket.on("users", (users) => {
+  currentUsers = users;
+  const me = users.find((user) => user.nickname === currentNickname);
+  if (me) currentRole = me.role;
+
   userList.innerHTML = "";
   users.forEach((user) => {
     const item = document.createElement("li");
@@ -70,6 +93,8 @@ socket.on("users", (users) => {
     item.className = user.nickname === currentNickname ? "is-me" : "";
     userList.append(item);
   });
+
+  renderAdminPanel();
 });
 
 socket.on("moderated", ({ reason }) => {
@@ -103,7 +128,52 @@ function showChat(response) {
   chatPanel.classList.remove("hidden");
   roomName.textContent = `#${response.room}`;
   roomTopic.textContent = response.topic;
+  renderAdminPanel();
   messageInput.focus();
+}
+
+function renderAdminPanel() {
+  if (currentRole !== "admin") {
+    adminPanel.classList.add("hidden");
+    adminUserList.innerHTML = "";
+    return;
+  }
+
+  adminPanel.classList.remove("hidden");
+  adminUserList.innerHTML = "";
+
+  currentUsers.forEach((user) => {
+    const row = document.createElement("div");
+    row.className = "admin-user";
+
+    const name = document.createElement("span");
+    name.textContent = user.role === "admin" ? `${user.nickname} admin` : user.nickname;
+    row.append(name);
+
+    const actions = document.createElement("div");
+    actions.className = "admin-actions";
+
+    if (user.nickname !== currentNickname && user.role !== "admin") {
+      actions.append(createAdminButton("Kick", "kick", user.nickname));
+      actions.append(createAdminButton("Ban", "ban", user.nickname));
+    }
+
+    row.append(actions);
+    adminUserList.append(row);
+  });
+}
+
+function createAdminButton(label, action, nickname) {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.textContent = label;
+  button.addEventListener("click", () => {
+    socket.emit("admin-action", {
+      action,
+      nickname,
+    });
+  });
+  return button;
 }
 
 function renderMessage(message) {

@@ -225,6 +225,65 @@ button:hover {
   font-weight: 700;
 }
 
+.admin-panel {
+  display: grid;
+  gap: 10px;
+  padding-top: 14px;
+  border-top: 1px solid var(--line);
+}
+
+.admin-user-list {
+  display: grid;
+  gap: 8px;
+}
+
+.admin-user {
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #fff;
+}
+
+.admin-user span {
+  min-width: 0;
+  font-size: 14px;
+  font-weight: 700;
+  overflow-wrap: anywhere;
+}
+
+.admin-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+}
+
+.admin-actions button,
+.admin-unban-form button {
+  min-height: 34px;
+  padding: 0 10px;
+  font-size: 13px;
+}
+
+.admin-actions button:last-child {
+  background: var(--warm);
+}
+
+.admin-actions button:last-child:hover {
+  background: #9f4320;
+}
+
+.admin-unban-form {
+  display: grid;
+  gap: 8px;
+}
+
+.admin-unban-form input {
+  min-height: 38px;
+  font-size: 13px;
+}
+
 .conversation {
   min-width: 0;
   min-height: 0;

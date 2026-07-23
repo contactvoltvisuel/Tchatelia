@@ -206,6 +206,16 @@ io.on("connection", (socket) => {
     });
   });
 
+  socket.on("admin-action", async ({ action, nickname }) => {
+    const user = users.get(socket.id);
+    if (!user) return;
+
+    const allowedActions = new Set(["kick", "ban", "unban"]);
+    if (!allowedActions.has(action)) return;
+
+    await handleModeration(socket, user, action, nickname);
+  });
+
   socket.on("disconnect", async () => {
     const user = users.get(socket.id);
     if (!user) return;
