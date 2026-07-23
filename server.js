@@ -14,15 +14,22 @@ import {
   deleteRoom,
   getAccountByNickname,
   getDatabaseLabel,
+  getPrivateBlockState,
+  getPrivateConversation,
   getRoomHistory,
   getRooms,
   initDatabase,
   isBanned,
   listAccounts,
   listModerationLogs,
+  listPrivateBlocks,
+  listPrivateMessagesForAccount,
+  markPrivateMessagesRead,
+  savePrivateMessage,
   saveMessage,
   saveModerationLog,
   setAccountActive,
+  setPrivateBlock,
   trimRoomHistory,
   unbanNickname,
   updateAccountPassword,
@@ -214,6 +221,9 @@ io.on("connection", (socket) => {
       await sendAccountList(socket);
       await sendModerationLogs(socket);
     }
+    if (account || cleanAuthMode === "register") {
+      await sendPrivateState(socket, normalizedNickname);
+    }
 
     callback?.({
       ok: true,
@@ -221,6 +231,7 @@ io.on("connection", (socket) => {
       room: cleanRoom,
       role,
       account: Boolean(account || cleanAuthMode === "register"),
+      accountNickname: account || cleanAuthMode === "register" ? normalizedNickname : "",
       topic: rooms.get(cleanRoom).topic,
     });
   });
@@ -426,6 +437,18 @@ io.on("connection", (socket) => {
     await sendProfile(socket, user, user.nickname);
   });
 
+  socket.on("private-action", async (payload = {}) => {
+    const user = users.get(socket.id);
+    if (!user) return;
+
+    if (!user.accountNickname) {
+      emitPrivateError(socket, "Les messages prives sont reserves aux comptes inscrits.");
+      return;
+    }
+
+    await handlePrivateAction(socket, user, payload);
+  });
+
   socket.on("disconnect", async () => {
     const user = users.get(socket.id);
     if (!user) return;
@@ -517,6 +540,7 @@ async function sendProfile(socket, viewer, rawNickname) {
   const account = await getAccountByNickname(nickname);
   if (account) {
     socket.emit("profile", {
+      accountNickname: account.nickname,
       nickname: account.displayName,
       role: account.role,
       bio: account.bio,
@@ -536,6 +560,7 @@ async function sendProfile(socket, viewer, rawNickname) {
 
   const target = targetEntry[1];
   socket.emit("profile", {
+    accountNickname: "",
     nickname: target.nickname,
     role: target.role,
     bio: "",
@@ -544,6 +569,210 @@ async function sendProfile(socket, viewer, rawNickname) {
     account: false,
     isOwn: false,
   });
+}
+
+async function handlePrivateAction(socket, user, payload) {
+  const action = String(payload.action || "");
+
+  if (action === "list") {
+    await sendPrivateState(socket, user.accountNickname);
+    return;
+  }
+
+  const targetNickname = normalizeName(payload.nickname);
+  if (!targetNickname || targetNickname === user.accountNickname) {
+    emitPrivateError(socket, "Choisis un autre compte pour cette conversation.");
+    return;
+  }
+
+  const targetAccount = await getAccountByNickname(targetNickname);
+  if (!targetAccount) {
+    emitPrivateError(socket, "Ce compte n'existe pas.");
+    return;
+  }
+
+  if (action === "open") {
+    await sendPrivateConversation(socket, user.accountNickname, targetAccount);
+    return;
+  }
+
+  if (action === "mark-read") {
+    await markPrivateMessagesRead(user.accountNickname, targetNickname, Date.now());
+    await refreshPrivateStateForAccount(user.accountNickname);
+    return;
+  }
+
+  if (action === "block" || action === "unblock") {
+    await setPrivateBlock(user.accountNickname, targetNickname, action === "block");
+    await sendPrivateConversation(socket, user.accountNickname, targetAccount);
+    emitToAccount(targetNickname, "private-block-changed", {
+      nickname: user.accountNickname,
+    });
+    return;
+  }
+
+  if (action !== "send") return;
+  if (!targetAccount.active) {
+    emitPrivateError(socket, "Ce compte est desactive.");
+    return;
+  }
+
+  const text = String(payload.text || "").trim().slice(0, 500);
+  if (!text) return;
+
+  const blockState = await getPrivateBlockState(user.accountNickname, targetNickname);
+  if (blockState.blockedByMe || blockState.blockedByThem) {
+    emitPrivateError(socket, "Cette conversation est bloquee.");
+    return;
+  }
+
+  const spamCheck = checkSpam(user, text);
+  if (!spamCheck.ok) {
+    emitPrivateError(socket, spamCheck.message);
+    return;
+  }
+
+  const privateMessage = {
+    id: crypto.randomUUID(),
+    sender: user.accountNickname,
+    recipient: targetNickname,
+    text,
+    createdAt: Date.now(),
+  };
+  await savePrivateMessage(privateMessage);
+
+  emitToAccount(user.accountNickname, "private-message", {
+    id: privateMessage.id,
+    text,
+    createdAt: privateMessage.createdAt,
+    fromMe: true,
+    counterpartAccount: targetNickname,
+    counterpartNickname: targetAccount.displayName,
+  });
+  emitToAccount(targetNickname, "private-message", {
+    id: privateMessage.id,
+    text,
+    createdAt: privateMessage.createdAt,
+    fromMe: false,
+    counterpartAccount: user.accountNickname,
+    counterpartNickname: user.nickname,
+  });
+
+  await refreshPrivateStateForAccount(user.accountNickname);
+  await refreshPrivateStateForAccount(targetNickname);
+}
+
+async function sendPrivateConversation(socket, accountNickname, targetAccount) {
+  await markPrivateMessagesRead(accountNickname, targetAccount.nickname, Date.now());
+  const [messages, blockState] = await Promise.all([
+    getPrivateConversation(accountNickname, targetAccount.nickname, 80),
+    getPrivateBlockState(accountNickname, targetAccount.nickname),
+  ]);
+
+  socket.emit("private-conversation", {
+    participant: {
+      accountNickname: targetAccount.nickname,
+      nickname: targetAccount.displayName,
+      role: targetAccount.role,
+      avatarUrl: targetAccount.avatarUrl
+        ? `/avatar/${encodeURIComponent(targetAccount.nickname)}`
+        : "",
+    },
+    messages: messages.map((message) => ({
+      id: message.id,
+      text: message.text,
+      createdAt: message.createdAt,
+      fromMe: message.sender === accountNickname,
+    })),
+    blockedByMe: blockState.blockedByMe,
+    blockedByThem: blockState.blockedByThem,
+    available: Boolean(targetAccount.active),
+  });
+
+  await refreshPrivateStateForAccount(accountNickname);
+}
+
+async function buildPrivateState(accountNickname) {
+  const [messages, blocks] = await Promise.all([
+    listPrivateMessagesForAccount(accountNickname, 5000),
+    listPrivateBlocks(accountNickname),
+  ]);
+  const conversationMap = new Map();
+
+  for (const message of messages) {
+    const counterpart =
+      message.sender === accountNickname ? message.recipient : message.sender;
+    let conversation = conversationMap.get(counterpart);
+
+    if (!conversation) {
+      conversation = {
+        accountNickname: counterpart,
+        lastText: message.text,
+        lastAt: message.createdAt,
+        unread: 0,
+      };
+      conversationMap.set(counterpart, conversation);
+    }
+
+    if (message.recipient === accountNickname && !message.readAt) {
+      conversation.unread += 1;
+    }
+  }
+
+  for (const block of blocks) {
+    if (conversationMap.has(block.blocked)) continue;
+    conversationMap.set(block.blocked, {
+      accountNickname: block.blocked,
+      lastText: "Utilisateur bloque",
+      lastAt: block.createdAt,
+      unread: 0,
+    });
+  }
+
+  const conversations = (
+    await Promise.all(
+      [...conversationMap.values()].map(async (conversation) => {
+        const account = await getAccountByNickname(conversation.accountNickname);
+        if (!account) return null;
+
+        return {
+          ...conversation,
+          nickname: account.displayName,
+          role: account.role,
+          avatarUrl: account.avatarUrl
+            ? `/avatar/${encodeURIComponent(account.nickname)}`
+            : "",
+        };
+      })
+    )
+  ).filter(Boolean);
+
+  conversations.sort((a, b) => Number(b.lastAt) - Number(a.lastAt));
+  return {
+    conversations,
+    totalUnread: conversations.reduce((total, conversation) => total + conversation.unread, 0),
+  };
+}
+
+async function sendPrivateState(socket, accountNickname) {
+  socket.emit("private-state", await buildPrivateState(accountNickname));
+}
+
+async function refreshPrivateStateForAccount(accountNickname) {
+  const state = await buildPrivateState(accountNickname);
+  emitToAccount(accountNickname, "private-state", state);
+}
+
+function emitToAccount(accountNickname, event, payload) {
+  for (const [socketId, connectedUser] of users.entries()) {
+    if (connectedUser.accountNickname === accountNickname) {
+      io.to(socketId).emit(event, payload);
+    }
+  }
+}
+
+function emitPrivateError(socket, text) {
+  socket.emit("private-error", { text });
 }
 
 async function sendAccountList(socket) {

@@ -64,6 +64,32 @@ export async function initDatabase() {
       details TEXT NOT NULL,
       created_at INTEGER NOT NULL
     );
+
+    CREATE TABLE IF NOT EXISTS private_messages (
+      id TEXT PRIMARY KEY,
+      sender TEXT NOT NULL,
+      recipient TEXT NOT NULL,
+      text TEXT NOT NULL,
+      created_at INTEGER NOT NULL,
+      read_at INTEGER,
+      FOREIGN KEY (sender) REFERENCES accounts(nickname),
+      FOREIGN KEY (recipient) REFERENCES accounts(nickname)
+    );
+
+    CREATE INDEX IF NOT EXISTS private_messages_sender_recipient_idx
+      ON private_messages (sender, recipient, created_at DESC);
+
+    CREATE INDEX IF NOT EXISTS private_messages_recipient_read_idx
+      ON private_messages (recipient, read_at, created_at DESC);
+
+    CREATE TABLE IF NOT EXISTS private_blocks (
+      blocker TEXT NOT NULL,
+      blocked TEXT NOT NULL,
+      created_at INTEGER NOT NULL,
+      PRIMARY KEY (blocker, blocked),
+      FOREIGN KEY (blocker) REFERENCES accounts(nickname),
+      FOREIGN KEY (blocked) REFERENCES accounts(nickname)
+    );
   `);
 
   try {
@@ -148,6 +174,109 @@ export async function saveModerationLog(log) {
       LIMIT 500
     )
   `);
+}
+
+export async function savePrivateMessage(message) {
+  db.prepare(`
+    INSERT INTO private_messages (id, sender, recipient, text, created_at, read_at)
+    VALUES (?, ?, ?, ?, ?, NULL)
+  `).run(message.id, message.sender, message.recipient, message.text, message.createdAt);
+  db.prepare(`
+    DELETE FROM private_messages
+    WHERE ((sender = ? AND recipient = ?) OR (sender = ? AND recipient = ?))
+      AND id NOT IN (
+        SELECT id
+        FROM private_messages
+        WHERE (sender = ? AND recipient = ?) OR (sender = ? AND recipient = ?)
+        ORDER BY created_at DESC
+        LIMIT 250
+      )
+  `).run(
+    message.sender,
+    message.recipient,
+    message.recipient,
+    message.sender,
+    message.sender,
+    message.recipient,
+    message.recipient,
+    message.sender
+  );
+}
+
+export async function getPrivateConversation(accountA, accountB, limit = 80) {
+  return db
+    .prepare(`
+      SELECT id, sender, recipient, text, created_at AS createdAt, read_at AS readAt
+      FROM private_messages
+      WHERE (sender = ? AND recipient = ?)
+        OR (sender = ? AND recipient = ?)
+      ORDER BY created_at DESC
+      LIMIT ?
+    `)
+    .all(accountA, accountB, accountB, accountA, limit)
+    .reverse();
+}
+
+export async function listPrivateMessagesForAccount(account, limit = 5000) {
+  return db
+    .prepare(`
+      SELECT id, sender, recipient, text, created_at AS createdAt, read_at AS readAt
+      FROM private_messages
+      WHERE sender = ? OR recipient = ?
+      ORDER BY created_at DESC
+      LIMIT ?
+    `)
+    .all(account, account, limit);
+}
+
+export async function markPrivateMessagesRead(recipient, sender, readAt) {
+  db.prepare(`
+    UPDATE private_messages
+    SET read_at = ?
+    WHERE recipient = ? AND sender = ? AND read_at IS NULL
+  `).run(readAt, recipient, sender);
+}
+
+export async function setPrivateBlock(blocker, blocked, shouldBlock) {
+  if (shouldBlock) {
+    db.prepare(`
+      INSERT OR IGNORE INTO private_blocks (blocker, blocked, created_at)
+      VALUES (?, ?, ?)
+    `).run(blocker, blocked, Date.now());
+    return;
+  }
+
+  db.prepare("DELETE FROM private_blocks WHERE blocker = ? AND blocked = ?").run(
+    blocker,
+    blocked
+  );
+}
+
+export async function getPrivateBlockState(accountA, accountB) {
+  const rows = db
+    .prepare(`
+      SELECT blocker, blocked
+      FROM private_blocks
+      WHERE (blocker = ? AND blocked = ?)
+        OR (blocker = ? AND blocked = ?)
+    `)
+    .all(accountA, accountB, accountB, accountA);
+
+  return {
+    blockedByMe: rows.some((row) => row.blocker === accountA),
+    blockedByThem: rows.some((row) => row.blocker === accountB),
+  };
+}
+
+export async function listPrivateBlocks(blocker) {
+  return db
+    .prepare(`
+      SELECT blocked, created_at AS createdAt
+      FROM private_blocks
+      WHERE blocker = ?
+      ORDER BY created_at DESC
+    `)
+    .all(blocker);
 }
 
 export async function createAccount(account) {

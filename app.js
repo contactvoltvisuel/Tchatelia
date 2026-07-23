@@ -26,6 +26,8 @@ const adminRefreshLogsButton = document.querySelector("#adminRefreshLogsButton")
 const adminModerationLogList = document.querySelector("#adminModerationLogList");
 const roomName = document.querySelector("#roomName");
 const roomTopic = document.querySelector("#roomTopic");
+const privateMessagesButton = document.querySelector("#privateMessagesButton");
+const privateUnreadBadge = document.querySelector("#privateUnreadBadge");
 const myProfileButton = document.querySelector("#myProfileButton");
 const leaveButton = document.querySelector("#leaveButton");
 const profileDialog = document.querySelector("#profileDialog");
@@ -41,15 +43,34 @@ const profileAvatarFileInput = document.querySelector("#profileAvatarFileInput")
 const profileAvatarInput = document.querySelector("#profileAvatarInput");
 const profileRemoveAvatarButton = document.querySelector("#profileRemoveAvatarButton");
 const profileBioInput = document.querySelector("#profileBioInput");
+const profilePrivateButton = document.querySelector("#profilePrivateButton");
+const privateDialog = document.querySelector("#privateDialog");
+const privateCloseButton = document.querySelector("#privateCloseButton");
+const privateConversationList = document.querySelector("#privateConversationList");
+const privateEmpty = document.querySelector("#privateEmpty");
+const privateActive = document.querySelector("#privateActive");
+const privateAvatarImage = document.querySelector("#privateAvatarImage");
+const privateAvatarFallback = document.querySelector("#privateAvatarFallback");
+const privateNickname = document.querySelector("#privateNickname");
+const privateStatus = document.querySelector("#privateStatus");
+const privateBlockButton = document.querySelector("#privateBlockButton");
+const privateMessages = document.querySelector("#privateMessages");
+const privateMessageForm = document.querySelector("#privateMessageForm");
+const privateMessageInput = document.querySelector("#privateMessageInput");
 
 let currentRoom = "accueil";
 let currentNickname = "";
 let currentRole = "user";
 let currentAccount = false;
+let currentAccountNickname = "";
 let currentUsers = [];
 let currentAccounts = [];
 let currentModerationLogs = [];
 let selectedAvatar = null;
+let currentProfileAccountNickname = "";
+let privateConversations = [];
+let activePrivateAccount = "";
+let activePrivateBlockedByMe = false;
 
 loginForm.addEventListener("submit", (event) => {
   event.preventDefault();
@@ -75,6 +96,7 @@ loginForm.addEventListener("submit", (event) => {
       currentNickname = response.nickname;
       currentRole = response.role;
       currentAccount = response.account;
+      currentAccountNickname = response.accountNickname;
       showChat(response);
     }
   );
@@ -95,12 +117,52 @@ myProfileButton.addEventListener("click", () => {
   requestProfile(currentNickname);
 });
 
+privateMessagesButton.addEventListener("click", () => {
+  openPrivateMessages();
+});
+
 profileCloseButton.addEventListener("click", () => {
   profileDialog.close();
 });
 
 profileDialog.addEventListener("click", (event) => {
   if (event.target === profileDialog) profileDialog.close();
+});
+
+profilePrivateButton.addEventListener("click", () => {
+  if (!currentProfileAccountNickname) return;
+  profileDialog.close();
+  openPrivateMessages(currentProfileAccountNickname);
+});
+
+privateCloseButton.addEventListener("click", () => {
+  privateDialog.close();
+});
+
+privateDialog.addEventListener("click", (event) => {
+  if (event.target === privateDialog) privateDialog.close();
+});
+
+privateMessageForm.addEventListener("submit", (event) => {
+  event.preventDefault();
+  const text = privateMessageInput.value.trim();
+  if (!text || !activePrivateAccount) return;
+
+  socket.emit("private-action", {
+    action: "send",
+    nickname: activePrivateAccount,
+    text,
+  });
+  privateMessageInput.value = "";
+  privateMessageInput.focus();
+});
+
+privateBlockButton.addEventListener("click", () => {
+  if (!activePrivateAccount) return;
+  socket.emit("private-action", {
+    action: activePrivateBlockedByMe ? "unblock" : "block",
+    nickname: activePrivateAccount,
+  });
 });
 
 profileForm.addEventListener("submit", (event) => {
@@ -299,6 +361,45 @@ socket.on("profile", (profile) => {
   renderProfile(profile);
 });
 
+socket.on("private-state", (state) => {
+  privateConversations = state.conversations;
+  renderPrivateState(state.totalUnread);
+});
+
+socket.on("private-conversation", (conversation) => {
+  renderPrivateConversation(conversation);
+});
+
+socket.on("private-message", (message) => {
+  if (
+    privateDialog.open &&
+    activePrivateAccount === message.counterpartAccount
+  ) {
+    renderPrivateMessage(message);
+    scrollPrivateMessages();
+
+    if (!message.fromMe) {
+      socket.emit("private-action", {
+        action: "mark-read",
+        nickname: activePrivateAccount,
+      });
+    }
+  }
+});
+
+socket.on("private-block-changed", ({ nickname }) => {
+  if (privateDialog.open && activePrivateAccount === nickname) {
+    socket.emit("private-action", {
+      action: "open",
+      nickname,
+    });
+  }
+});
+
+socket.on("private-error", ({ text }) => {
+  alert(text);
+});
+
 function switchRoom(room) {
   socket.emit("switch-room", room, (response) => {
     currentRoom = response.room;
@@ -313,6 +414,7 @@ function showChat(response) {
   roomName.textContent = `#${response.room}`;
   roomTopic.textContent = response.topic;
   myProfileButton.classList.toggle("hidden", !currentAccount);
+  privateMessagesButton.classList.toggle("hidden", !currentAccount);
   renderAdminPanel();
   messageInput.focus();
 }
@@ -532,6 +634,7 @@ function requestProfile(nickname) {
 }
 
 function renderProfile(profile) {
+  currentProfileAccountNickname = profile.accountNickname || "";
   profileNickname.textContent = profile.nickname;
   profileRole.textContent = profile.account ? formatRole(profile.role) : "invite";
   profileBio.textContent = profile.bio || "Aucune description.";
@@ -544,6 +647,10 @@ function renderProfile(profile) {
   setAvatar(profileAvatarImage, profileAvatarFallback, profile.avatarUrl, profile.nickname);
 
   profileForm.classList.toggle("hidden", !profile.isOwn);
+  profilePrivateButton.classList.toggle(
+    "hidden",
+    !currentAccount || !profile.account || profile.isOwn
+  );
   if (profile.isOwn) {
     selectedAvatar = profile.avatarUrl?.startsWith("data:image/") ? profile.avatarUrl : null;
     profileAvatarFileInput.value = "";
@@ -589,6 +696,138 @@ function setAvatar(image, fallback, avatarUrl, nickname) {
 
 function getInitials(nickname) {
   return String(nickname || "?").slice(0, 2).toUpperCase();
+}
+
+function openPrivateMessages(accountNickname = "") {
+  if (!currentAccount) return;
+  if (!privateDialog.open) privateDialog.showModal();
+
+  socket.emit("private-action", {
+    action: "list",
+  });
+
+  if (accountNickname) {
+    activePrivateAccount = accountNickname;
+    socket.emit("private-action", {
+      action: "open",
+      nickname: accountNickname,
+    });
+  }
+}
+
+function renderPrivateState(totalUnread) {
+  privateUnreadBadge.textContent = totalUnread;
+  privateUnreadBadge.classList.toggle("hidden", totalUnread === 0);
+  privateConversationList.innerHTML = "";
+
+  if (!privateConversations.length) {
+    const empty = document.createElement("p");
+    empty.className = "admin-empty";
+    empty.textContent = "Aucune conversation.";
+    privateConversationList.append(empty);
+    return;
+  }
+
+  privateConversations.forEach((conversation) => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className =
+      conversation.accountNickname === activePrivateAccount
+        ? "private-conversation-button active"
+        : "private-conversation-button";
+
+    button.append(createAvatar(conversation, "small"));
+
+    const content = document.createElement("span");
+    content.className = "private-conversation-copy";
+
+    const title = document.createElement("strong");
+    title.textContent = conversation.nickname;
+
+    const preview = document.createElement("small");
+    preview.textContent = conversation.lastText;
+
+    content.append(title, preview);
+    button.append(content);
+
+    if (conversation.unread > 0) {
+      const unread = document.createElement("span");
+      unread.className = "private-list-unread";
+      unread.textContent = conversation.unread;
+      button.append(unread);
+    }
+
+    button.addEventListener("click", () => {
+      activePrivateAccount = conversation.accountNickname;
+      socket.emit("private-action", {
+        action: "open",
+        nickname: conversation.accountNickname,
+      });
+    });
+
+    privateConversationList.append(button);
+  });
+}
+
+function renderPrivateConversation(conversation) {
+  activePrivateAccount = conversation.participant.accountNickname;
+  activePrivateBlockedByMe = conversation.blockedByMe;
+
+  privateEmpty.classList.add("hidden");
+  privateActive.classList.remove("hidden");
+  privateNickname.textContent = conversation.participant.nickname;
+  setAvatar(
+    privateAvatarImage,
+    privateAvatarFallback,
+    conversation.participant.avatarUrl,
+    conversation.participant.nickname
+  );
+
+  const unavailable =
+    conversation.blockedByMe || conversation.blockedByThem || !conversation.available;
+  privateStatus.textContent = !conversation.available
+    ? "Compte desactive"
+    : conversation.blockedByMe
+      ? "Utilisateur bloque"
+      : conversation.blockedByThem
+        ? "Cette personne vous a bloque"
+        : formatRole(conversation.participant.role);
+
+  privateBlockButton.textContent = conversation.blockedByMe ? "Debloquer" : "Bloquer";
+  privateMessageInput.disabled = unavailable;
+  privateMessageForm.querySelector("button").disabled = unavailable;
+  privateMessageInput.placeholder = unavailable
+    ? "Conversation indisponible"
+    : "Ecris un message prive...";
+
+  privateMessages.innerHTML = "";
+  conversation.messages.forEach(renderPrivateMessage);
+  scrollPrivateMessages();
+  renderPrivateState(
+    privateConversations.reduce((total, item) => total + item.unread, 0)
+  );
+  if (!unavailable) privateMessageInput.focus();
+}
+
+function renderPrivateMessage(message) {
+  const row = document.createElement("article");
+  row.className = message.fromMe ? "private-message from-me" : "private-message";
+
+  const text = document.createElement("p");
+  text.textContent = message.text;
+
+  const time = document.createElement("time");
+  time.textContent = new Intl.DateTimeFormat("fr-FR", {
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(Number(message.createdAt));
+
+  row.append(text, time);
+  privateMessages.append(row);
+}
+
+function scrollPrivateMessages() {
+  privateMessages.scrollTop = privateMessages.scrollHeight;
 }
 
 function resizeAvatar(file) {

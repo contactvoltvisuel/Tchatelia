@@ -151,6 +151,10 @@
               <h1 id="roomTopic">Salon general pour discuter librement.</h1>
             </div>
             <div class="chat-header-actions">
+              <button class="ghost-button hidden" id="privateMessagesButton" type="button">
+                Messages
+                <span class="private-unread-badge hidden" id="privateUnreadBadge">0</span>
+              </button>
               <button class="ghost-button hidden" id="myProfileButton" type="button">Mon profil</button>
               <button class="ghost-button" id="leaveButton" type="button">Sortir</button>
             </div>
@@ -187,6 +191,9 @@
         </div>
       </div>
       <p class="profile-bio" id="profileBio"></p>
+      <button class="profile-private-button hidden" id="profilePrivateButton" type="button">
+        Message prive
+      </button>
       <form class="profile-form hidden" id="profileForm">
         <label for="profileAvatarFileInput">Photo depuis l'ordinateur</label>
         <input
@@ -208,6 +215,50 @@
         <textarea id="profileBioInput" maxlength="180" rows="4"></textarea>
         <button type="submit">Enregistrer</button>
       </form>
+    </dialog>
+
+    <dialog class="private-dialog" id="privateDialog">
+      <button class="profile-close-button" id="privateCloseButton" type="button" aria-label="Fermer">
+        X
+      </button>
+      <div class="private-layout">
+        <aside class="private-sidebar">
+          <h2>Messages prives</h2>
+          <div class="private-conversation-list" id="privateConversationList"></div>
+        </aside>
+        <section class="private-conversation-panel">
+          <div class="private-empty" id="privateEmpty">
+            <p>Choisis une conversation.</p>
+          </div>
+          <div class="private-active hidden" id="privateActive">
+            <header class="private-header">
+              <div class="private-participant">
+                <span class="user-avatar private-avatar">
+                  <img id="privateAvatarImage" alt="" referrerpolicy="no-referrer" />
+                  <span id="privateAvatarFallback"></span>
+                </span>
+                <div>
+                  <strong id="privateNickname"></strong>
+                  <small id="privateStatus"></small>
+                </div>
+              </div>
+              <button class="profile-remove-avatar" id="privateBlockButton" type="button">
+                Bloquer
+              </button>
+            </header>
+            <div class="private-messages" id="privateMessages" aria-live="polite"></div>
+            <form class="private-message-form" id="privateMessageForm">
+              <input
+                id="privateMessageInput"
+                maxlength="500"
+                autocomplete="off"
+                placeholder="Ecris un message prive..."
+              />
+              <button type="submit">Envoyer</button>
+            </form>
+          </div>
+        </section>
+      </div>
     </dialog>
 
     <script src="/socket.io/socket.io.js"></script>

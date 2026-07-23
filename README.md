@@ -17,6 +17,7 @@ Prerequis : Node.js 24 ou plus recent.
 - Role moderateur : kick, ban et unban sans acces a la gestion complete.
 - Journal de moderation persistant : exclusions, bannissements, comptes et salons.
 - Profils utilisateurs : photo importee ou avatar par lien, description, role et date d'inscription.
+- Messages prives persistants entre comptes, compteur de non-lus et blocage.
 - Commandes de moderation : `/kick pseudo`, `/ban pseudo`, `/unban pseudo`.
 - Panneau admin : kick, ban, unban, creation et suppression de salons.
 - Historique et bannissements sauvegardes en SQLite local ou PostgreSQL/Supabase.
