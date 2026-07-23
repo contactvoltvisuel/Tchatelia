@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="fr">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Tchatelia</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <main class="shell">
+      <section class="login-panel" id="loginPanel">
+        <div>
+          <p class="eyebrow">Salons publics gratuits</p>
+          <h1>Tchatelia</h1>
+          <p class="intro">
+            Une premiere version type EuropNet : pseudo libre, salons publics,
+            messages instantanes et connectes visibles.
+          </p>
+        </div>
+
+        <form class="login-form" id="loginForm">
+          <label for="nickname">Pseudo</label>
+          <input
+            id="nickname"
+            name="nickname"
+            maxlength="18"
+            autocomplete="nickname"
+            placeholder="TonPseudo"
+            required
+          />
+
+          <label for="room">Salon</label>
+          <select id="room" name="room">
+            <option value="accueil">#accueil</option>
+            <option value="aide">#aide</option>
+            <option value="musique">#musique</option>
+            <option value="rencontres">#rencontres</option>
+          </select>
+
+          <label for="adminPassword">Mot de passe admin</label>
+          <input
+            id="adminPassword"
+            name="adminPassword"
+            type="password"
+            autocomplete="current-password"
+            placeholder="Optionnel"
+          />
+
+          <button type="submit">Entrer dans le chat</button>
+        </form>
+      </section>
+
+      <section class="chat-panel hidden" id="chatPanel" aria-label="Chat">
+        <aside class="sidebar">
+          <div class="brand">
+            <span class="status-dot"></span>
+            <strong>Tchatelia</strong>
+          </div>
+          <div>
+            <h2>Salons</h2>
+            <div class="room-list" id="roomList"></div>
+          </div>
+          <div>
+            <h2>Connectes</h2>
+            <ul class="user-list" id="userList"></ul>
+          </div>
+        </aside>
+
+        <div class="conversation">
+          <header class="chat-header">
+            <div>
+              <p class="eyebrow" id="roomName">#accueil</p>
+              <h1 id="roomTopic">Salon general pour discuter librement.</h1>
+            </div>
+            <button class="ghost-button" id="leaveButton" type="button">Sortir</button>
+          </header>
+
+          <div class="messages" id="messages" aria-live="polite"></div>
+
+          <form class="message-form" id="messageForm">
+            <input
+              id="messageInput"
+              maxlength="500"
+              autocomplete="off"
+              placeholder="Ecris un message... /help affiche les commandes"
+            />
+            <button type="submit">Envoyer</button>
+          </form>
+        </div>
+      </section>
+    </main>
+
+    <script src="/socket.io/socket.io.js"></script>
+    <script src="/app.js"></script>
+  </body>
+</html>
