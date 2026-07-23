@@ -24,6 +24,8 @@ const adminAccountList = document.querySelector("#adminAccountList");
 const adminModerationLogPanel = document.querySelector(".admin-moderation-log-panel");
 const adminRefreshLogsButton = document.querySelector("#adminRefreshLogsButton");
 const adminModerationLogList = document.querySelector("#adminModerationLogList");
+const adminRefreshReportsButton = document.querySelector("#adminRefreshReportsButton");
+const adminReportList = document.querySelector("#adminReportList");
 const roomName = document.querySelector("#roomName");
 const roomTopic = document.querySelector("#roomTopic");
 const privateMessagesButton = document.querySelector("#privateMessagesButton");
@@ -44,6 +46,7 @@ const profileAvatarInput = document.querySelector("#profileAvatarInput");
 const profileRemoveAvatarButton = document.querySelector("#profileRemoveAvatarButton");
 const profileBioInput = document.querySelector("#profileBioInput");
 const profilePrivateButton = document.querySelector("#profilePrivateButton");
+const profileReportButton = document.querySelector("#profileReportButton");
 const privateDialog = document.querySelector("#privateDialog");
 const privateCloseButton = document.querySelector("#privateCloseButton");
 const privateConversationList = document.querySelector("#privateConversationList");
@@ -57,6 +60,13 @@ const privateBlockButton = document.querySelector("#privateBlockButton");
 const privateMessages = document.querySelector("#privateMessages");
 const privateMessageForm = document.querySelector("#privateMessageForm");
 const privateMessageInput = document.querySelector("#privateMessageInput");
+const reportDialog = document.querySelector("#reportDialog");
+const reportCloseButton = document.querySelector("#reportCloseButton");
+const reportTitle = document.querySelector("#reportTitle");
+const reportContext = document.querySelector("#reportContext");
+const reportForm = document.querySelector("#reportForm");
+const reportReason = document.querySelector("#reportReason");
+const reportDetails = document.querySelector("#reportDetails");
 
 let currentRoom = "accueil";
 let currentNickname = "";
@@ -66,16 +76,20 @@ let currentAccountNickname = "";
 let currentUsers = [];
 let currentAccounts = [];
 let currentModerationLogs = [];
+let currentReports = [];
 let selectedAvatar = null;
 let currentProfileAccountNickname = "";
+let currentProfileNickname = "";
 let privateConversations = [];
 let activePrivateAccount = "";
 let activePrivateBlockedByMe = false;
+let pendingReport = null;
 
 loginForm.addEventListener("submit", (event) => {
   event.preventDefault();
   const data = new FormData(loginForm);
   currentNickname = data.get("nickname");
+  currentAccount = data.get("authMode") !== "guest";
 
   socket.emit(
     "join",
@@ -88,6 +102,7 @@ loginForm.addEventListener("submit", (event) => {
     },
     (response) => {
       if (!response.ok) {
+        currentAccount = false;
         alert(response.error || "Impossible d'entrer dans le chat.");
         return;
       }
@@ -135,6 +150,15 @@ profilePrivateButton.addEventListener("click", () => {
   openPrivateMessages(currentProfileAccountNickname);
 });
 
+profileReportButton.addEventListener("click", () => {
+  profileDialog.close();
+  openReportDialog({
+    kind: "profile",
+    target: currentProfileAccountNickname || currentProfileNickname,
+    targetDisplay: currentProfileNickname,
+  });
+});
+
 privateCloseButton.addEventListener("click", () => {
   privateDialog.close();
 });
@@ -162,6 +186,26 @@ privateBlockButton.addEventListener("click", () => {
   socket.emit("private-action", {
     action: activePrivateBlockedByMe ? "unblock" : "block",
     nickname: activePrivateAccount,
+  });
+});
+
+reportCloseButton.addEventListener("click", () => {
+  reportDialog.close();
+});
+
+reportDialog.addEventListener("click", (event) => {
+  if (event.target === reportDialog) reportDialog.close();
+});
+
+reportForm.addEventListener("submit", (event) => {
+  event.preventDefault();
+  if (!pendingReport) return;
+
+  socket.emit("report-action", {
+    action: "create",
+    ...pendingReport,
+    reason: reportReason.value,
+    details: reportDetails.value,
   });
 });
 
@@ -283,6 +327,12 @@ adminRefreshLogsButton.addEventListener("click", () => {
   });
 });
 
+adminRefreshReportsButton.addEventListener("click", () => {
+  socket.emit("report-action", {
+    action: "list",
+  });
+});
+
 socket.on("history", (history) => {
   messages.innerHTML = "";
   history.forEach(renderMessage);
@@ -357,6 +407,21 @@ socket.on("moderation-logs", (logs) => {
   renderModerationLog();
 });
 
+socket.on("reports", (reports) => {
+  currentReports = reports;
+  renderReports();
+});
+
+socket.on("report-created", () => {
+  pendingReport = null;
+  reportDialog.close();
+  alert("Signalement envoye a l'equipe de moderation.");
+});
+
+socket.on("report-error", ({ text }) => {
+  alert(text);
+});
+
 socket.on("profile", (profile) => {
   renderProfile(profile);
 });
@@ -428,6 +493,7 @@ function renderAdminPanel() {
     adminUserList.innerHTML = "";
     adminAccountList.innerHTML = "";
     adminModerationLogList.innerHTML = "";
+    adminReportList.innerHTML = "";
     return;
   }
 
@@ -439,6 +505,9 @@ function renderAdminPanel() {
   adminAccountPanel.classList.toggle("hidden", !canManage);
   adminModerationLogPanel.classList.toggle("hidden", !canManage);
   adminDeleteRoomButton.disabled = currentRoom === "accueil";
+  socket.emit("report-action", {
+    action: "list",
+  });
 
   if (canManage) {
     socket.emit("account-action", {
@@ -474,6 +543,7 @@ function renderAdminPanel() {
 
   renderAccountPanel();
   renderModerationLog();
+  renderReports();
 }
 
 function renderAccountPanel() {
@@ -585,6 +655,101 @@ function renderModerationLog() {
   });
 }
 
+function renderReports() {
+  if (currentRole !== "admin" && currentRole !== "moderator") return;
+
+  adminReportList.innerHTML = "";
+
+  if (!currentReports.length) {
+    const empty = document.createElement("p");
+    empty.className = "admin-empty";
+    empty.textContent = "Aucun signalement.";
+    adminReportList.append(empty);
+    return;
+  }
+
+  currentReports.forEach((report) => {
+    const row = document.createElement("article");
+    row.className = `admin-report ${report.status}`;
+
+    const title = document.createElement("strong");
+    title.textContent = `${formatReportKind(report.kind)} : ${report.targetDisplay}`;
+
+    const reason = document.createElement("span");
+    reason.textContent = `Motif : ${formatReportReason(report.reason)}`;
+
+    const snapshot = document.createElement("p");
+    snapshot.textContent = report.contentSnapshot || "Aucun contenu.";
+
+    const meta = document.createElement("small");
+    const date = new Intl.DateTimeFormat("fr-FR", {
+      dateStyle: "short",
+      timeStyle: "short",
+    }).format(Number(report.createdAt));
+    meta.textContent = `${date} - par ${report.reporterDisplay} - ${report.room}`;
+
+    row.append(title, reason, snapshot);
+    if (report.details) {
+      const details = document.createElement("small");
+      details.textContent = `Precision : ${report.details}`;
+      row.append(details);
+    }
+    row.append(meta);
+
+    if (report.status === "open") {
+      const actions = document.createElement("div");
+      actions.className = "admin-report-actions";
+      actions.append(
+        createReportActionButton("Traite", "resolve", report.id),
+        createReportActionButton("Rejeter", "dismiss", report.id)
+      );
+      row.append(actions);
+    } else {
+      const status = document.createElement("small");
+      status.className = "admin-report-status";
+      status.textContent =
+        report.status === "resolved"
+          ? `Traite par ${report.handledBy}`
+          : `Rejete par ${report.handledBy}`;
+      row.append(status);
+    }
+
+    adminReportList.append(row);
+  });
+}
+
+function createReportActionButton(label, action, id) {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.textContent = label;
+  button.addEventListener("click", () => {
+    socket.emit("report-action", {
+      action,
+      id,
+    });
+  });
+  return button;
+}
+
+function formatReportKind(kind) {
+  const labels = {
+    profile: "Profil",
+    public_message: "Message public",
+    private_message: "Message prive",
+  };
+  return labels[kind] || kind;
+}
+
+function formatReportReason(reason) {
+  const labels = {
+    spam: "Spam",
+    harassment: "Harcelement",
+    inappropriate: "Contenu inapproprie",
+    other: "Autre",
+  };
+  return labels[reason] || reason;
+}
+
 function formatLogAction(action) {
   const labels = {
     kick: "Exclusion",
@@ -597,6 +762,8 @@ function formatLogAction(action) {
     room_created: "Salon cree",
     room_topic: "Sujet modifie",
     room_deleted: "Salon supprime",
+    report_resolved: "Signalement traite",
+    report_dismissed: "Signalement rejete",
   };
   return labels[action] || action;
 }
@@ -635,6 +802,7 @@ function requestProfile(nickname) {
 
 function renderProfile(profile) {
   currentProfileAccountNickname = profile.accountNickname || "";
+  currentProfileNickname = profile.nickname;
   profileNickname.textContent = profile.nickname;
   profileRole.textContent = profile.account ? formatRole(profile.role) : "invite";
   profileBio.textContent = profile.bio || "Aucune description.";
@@ -651,6 +819,7 @@ function renderProfile(profile) {
     "hidden",
     !currentAccount || !profile.account || profile.isOwn
   );
+  profileReportButton.classList.toggle("hidden", !currentAccount || profile.isOwn);
   if (profile.isOwn) {
     selectedAvatar = profile.avatarUrl?.startsWith("data:image/") ? profile.avatarUrl : null;
     profileAvatarFileInput.value = "";
@@ -696,6 +865,33 @@ function setAvatar(image, fallback, avatarUrl, nickname) {
 
 function getInitials(nickname) {
   return String(nickname || "?").slice(0, 2).toUpperCase();
+}
+
+function openReportDialog(report) {
+  if (!currentAccount) {
+    alert("Cree un compte pour envoyer un signalement.");
+    return;
+  }
+
+  pendingReport = {
+    kind: report.kind,
+    target: report.target || "",
+    messageId: report.messageId || "",
+  };
+  reportTitle.textContent =
+    report.kind === "profile"
+      ? `Signaler le profil de ${report.targetDisplay}`
+      : `Signaler un message de ${report.targetDisplay}`;
+  reportContext.textContent =
+    report.kind === "private_message"
+      ? "Message prive"
+      : report.kind === "public_message"
+        ? `Message dans #${currentRoom}`
+        : "Profil utilisateur";
+  reportReason.value = "spam";
+  reportDetails.value = "";
+
+  if (!reportDialog.open) reportDialog.showModal();
 }
 
 function openPrivateMessages(accountNickname = "") {
@@ -823,6 +1019,22 @@ function renderPrivateMessage(message) {
   }).format(Number(message.createdAt));
 
   row.append(text, time);
+
+  if (currentAccount && !message.fromMe) {
+    const reportButton = document.createElement("button");
+    reportButton.type = "button";
+    reportButton.className = "message-report-button";
+    reportButton.textContent = "Signaler";
+    reportButton.addEventListener("click", () => {
+      privateDialog.close();
+      openReportDialog({
+        kind: "private_message",
+        targetDisplay: privateNickname.textContent,
+        messageId: message.id,
+      });
+    });
+    row.append(reportButton);
+  }
   privateMessages.append(row);
 }
 
@@ -900,6 +1112,21 @@ function renderMessage(message) {
     </div>
     <p>${escapeHtml(message.text)}</p>
   `;
+
+  if (currentAccount && message.nickname !== currentNickname) {
+    const reportButton = document.createElement("button");
+    reportButton.type = "button";
+    reportButton.className = "message-report-button";
+    reportButton.textContent = "Signaler";
+    reportButton.addEventListener("click", () => {
+      openReportDialog({
+        kind: "public_message",
+        targetDisplay: message.nickname,
+        messageId: message.id,
+      });
+    });
+    row.querySelector(".message-meta").append(reportButton);
+  }
 
   messages.append(row);
 }

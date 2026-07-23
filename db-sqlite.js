@@ -90,6 +90,31 @@ export async function initDatabase() {
       FOREIGN KEY (blocker) REFERENCES accounts(nickname),
       FOREIGN KEY (blocked) REFERENCES accounts(nickname)
     );
+
+    CREATE TABLE IF NOT EXISTS reports (
+      id TEXT PRIMARY KEY,
+      reporter TEXT NOT NULL,
+      reporter_display TEXT NOT NULL,
+      target TEXT NOT NULL,
+      target_display TEXT NOT NULL,
+      kind TEXT NOT NULL,
+      reference TEXT NOT NULL,
+      reason TEXT NOT NULL,
+      details TEXT NOT NULL,
+      content_snapshot TEXT NOT NULL,
+      room TEXT NOT NULL,
+      status TEXT NOT NULL,
+      handled_by TEXT NOT NULL,
+      created_at INTEGER NOT NULL,
+      handled_at INTEGER,
+      FOREIGN KEY (reporter) REFERENCES accounts(nickname)
+    );
+
+    CREATE INDEX IF NOT EXISTS reports_status_created_idx
+      ON reports (status, created_at DESC);
+
+    CREATE INDEX IF NOT EXISTS reports_reporter_reference_idx
+      ON reports (reporter, reference, status);
   `);
 
   try {
@@ -277,6 +302,106 @@ export async function listPrivateBlocks(blocker) {
       ORDER BY created_at DESC
     `)
     .all(blocker);
+}
+
+export async function getMessageById(id) {
+  return db
+    .prepare(`
+      SELECT id, room, type, nickname, text, created_at AS createdAt
+      FROM messages
+      WHERE id = ?
+    `)
+    .get(id);
+}
+
+export async function getPrivateMessageById(id) {
+  return db
+    .prepare(`
+      SELECT id, sender, recipient, text, created_at AS createdAt
+      FROM private_messages
+      WHERE id = ?
+    `)
+    .get(id);
+}
+
+export async function hasOpenReport(reporter, reference) {
+  return Boolean(
+    db
+      .prepare(`
+        SELECT 1
+        FROM reports
+        WHERE reporter = ? AND reference = ? AND status = 'open'
+        LIMIT 1
+      `)
+      .get(reporter, reference)
+  );
+}
+
+export async function createReport(report) {
+  db.prepare(`
+    INSERT INTO reports (
+      id, reporter, reporter_display, target, target_display, kind, reference,
+      reason, details, content_snapshot, room, status, handled_by, created_at, handled_at
+    )
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'open', '', ?, NULL)
+  `).run(
+    report.id,
+    report.reporter,
+    report.reporterDisplay,
+    report.target,
+    report.targetDisplay,
+    report.kind,
+    report.reference,
+    report.reason,
+    report.details,
+    report.contentSnapshot,
+    report.room,
+    report.createdAt
+  );
+}
+
+export async function listReports(limit = 100) {
+  return db
+    .prepare(`
+      SELECT id, reporter, reporter_display AS reporterDisplay, target,
+        target_display AS targetDisplay, kind, reference, reason, details,
+        content_snapshot AS contentSnapshot, room, status,
+        handled_by AS handledBy, created_at AS createdAt, handled_at AS handledAt
+      FROM reports
+      ORDER BY CASE WHEN status = 'open' THEN 0 ELSE 1 END, created_at DESC
+      LIMIT ?
+    `)
+    .all(limit);
+}
+
+export async function getReportById(id) {
+  return db
+    .prepare(`
+      SELECT id, reporter, reporter_display AS reporterDisplay, target,
+        target_display AS targetDisplay, kind, reference, reason, details,
+        content_snapshot AS contentSnapshot, room, status,
+        handled_by AS handledBy, created_at AS createdAt, handled_at AS handledAt
+      FROM reports
+      WHERE id = ?
+    `)
+    .get(id);
+}
+
+export async function updateReportStatus(id, status, handledBy) {
+  db.prepare(`
+    UPDATE reports
+    SET status = ?, handled_by = ?, handled_at = ?
+      WHERE id = ?
+  `).run(status, handledBy, Date.now(), id);
+  db.exec(`
+    DELETE FROM reports
+    WHERE status != 'open'
+      AND id NOT IN (
+        SELECT id FROM reports
+        ORDER BY created_at DESC
+        LIMIT 1000
+      )
+  `);
 }
 
 export async function createAccount(account) {

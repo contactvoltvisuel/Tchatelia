@@ -100,6 +100,13 @@
               />
               <button type="submit">Unban</button>
             </form>
+            <div class="admin-report-panel">
+              <div class="admin-section-title">
+                <h2>Signalements</h2>
+                <button id="adminRefreshReportsButton" type="button">Actualiser</button>
+              </div>
+              <div class="admin-report-list" id="adminReportList"></div>
+            </div>
             <form class="admin-room-form" id="adminRoomCreateForm">
               <input
                 id="adminRoomNameInput"
@@ -191,9 +198,14 @@
         </div>
       </div>
       <p class="profile-bio" id="profileBio"></p>
-      <button class="profile-private-button hidden" id="profilePrivateButton" type="button">
-        Message prive
-      </button>
+      <div class="profile-actions">
+        <button class="profile-private-button hidden" id="profilePrivateButton" type="button">
+          Message prive
+        </button>
+        <button class="profile-report-button hidden" id="profileReportButton" type="button">
+          Signaler
+        </button>
+      </div>
       <form class="profile-form hidden" id="profileForm">
         <label for="profileAvatarFileInput">Photo depuis l'ordinateur</label>
         <input
@@ -259,6 +271,27 @@
           </div>
         </section>
       </div>
+    </dialog>
+
+    <dialog class="report-dialog" id="reportDialog">
+      <button class="profile-close-button" id="reportCloseButton" type="button" aria-label="Fermer">
+        X
+      </button>
+      <p class="eyebrow">Signalement</p>
+      <h2 id="reportTitle">Signaler un contenu</h2>
+      <p class="report-context" id="reportContext"></p>
+      <form class="report-form" id="reportForm">
+        <label for="reportReason">Motif</label>
+        <select id="reportReason">
+          <option value="spam">Spam</option>
+          <option value="harassment">Harcelement</option>
+          <option value="inappropriate">Contenu inapproprie</option>
+          <option value="other">Autre</option>
+        </select>
+        <label for="reportDetails">Precision facultative</label>
+        <textarea id="reportDetails" maxlength="300" rows="4"></textarea>
+        <button type="submit">Envoyer le signalement</button>
+      </form>
     </dialog>
 
     <script src="/socket.io/socket.io.js"></script>

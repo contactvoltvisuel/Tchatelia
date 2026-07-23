@@ -81,6 +81,30 @@ export async function initDatabase() {
       created_at BIGINT NOT NULL,
       PRIMARY KEY (blocker, blocked)
     );
+
+    CREATE TABLE IF NOT EXISTS reports (
+      id TEXT PRIMARY KEY,
+      reporter TEXT NOT NULL REFERENCES accounts(nickname),
+      reporter_display TEXT NOT NULL,
+      target TEXT NOT NULL,
+      target_display TEXT NOT NULL,
+      kind TEXT NOT NULL,
+      reference TEXT NOT NULL,
+      reason TEXT NOT NULL,
+      details TEXT NOT NULL,
+      content_snapshot TEXT NOT NULL,
+      room TEXT NOT NULL,
+      status TEXT NOT NULL,
+      handled_by TEXT NOT NULL,
+      created_at BIGINT NOT NULL,
+      handled_at BIGINT
+    );
+
+    CREATE INDEX IF NOT EXISTS reports_status_created_idx
+      ON reports (status, created_at DESC);
+
+    CREATE INDEX IF NOT EXISTS reports_reporter_reference_idx
+      ON reports (reporter, reference, status);
   `);
 
   await pool.query("ALTER TABLE accounts ADD COLUMN IF NOT EXISTS active BOOLEAN NOT NULL DEFAULT TRUE");
@@ -273,6 +297,120 @@ export async function listPrivateBlocks(blocker) {
     [blocker]
   );
   return result.rows;
+}
+
+export async function getMessageById(id) {
+  const result = await pool.query(
+    `
+      SELECT id, room, type, nickname, text, created_at AS "createdAt"
+      FROM messages
+      WHERE id = $1
+    `,
+    [id]
+  );
+  return result.rows[0];
+}
+
+export async function getPrivateMessageById(id) {
+  const result = await pool.query(
+    `
+      SELECT id, sender, recipient, text, created_at AS "createdAt"
+      FROM private_messages
+      WHERE id = $1
+    `,
+    [id]
+  );
+  return result.rows[0];
+}
+
+export async function hasOpenReport(reporter, reference) {
+  const result = await pool.query(
+    `
+      SELECT 1
+      FROM reports
+      WHERE reporter = $1 AND reference = $2 AND status = 'open'
+      LIMIT 1
+    `,
+    [reporter, reference]
+  );
+  return result.rowCount > 0;
+}
+
+export async function createReport(report) {
+  await pool.query(
+    `
+      INSERT INTO reports (
+        id, reporter, reporter_display, target, target_display, kind, reference,
+        reason, details, content_snapshot, room, status, handled_by, created_at, handled_at
+      )
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, 'open', '', $12, NULL)
+    `,
+    [
+      report.id,
+      report.reporter,
+      report.reporterDisplay,
+      report.target,
+      report.targetDisplay,
+      report.kind,
+      report.reference,
+      report.reason,
+      report.details,
+      report.contentSnapshot,
+      report.room,
+      report.createdAt,
+    ]
+  );
+}
+
+export async function listReports(limit = 100) {
+  const result = await pool.query(
+    `
+      SELECT id, reporter, reporter_display AS "reporterDisplay", target,
+        target_display AS "targetDisplay", kind, reference, reason, details,
+        content_snapshot AS "contentSnapshot", room, status,
+        handled_by AS "handledBy", created_at AS "createdAt", handled_at AS "handledAt"
+      FROM reports
+      ORDER BY CASE WHEN status = 'open' THEN 0 ELSE 1 END, created_at DESC
+      LIMIT $1
+    `,
+    [limit]
+  );
+  return result.rows;
+}
+
+export async function getReportById(id) {
+  const result = await pool.query(
+    `
+      SELECT id, reporter, reporter_display AS "reporterDisplay", target,
+        target_display AS "targetDisplay", kind, reference, reason, details,
+        content_snapshot AS "contentSnapshot", room, status,
+        handled_by AS "handledBy", created_at AS "createdAt", handled_at AS "handledAt"
+      FROM reports
+      WHERE id = $1
+    `,
+    [id]
+  );
+  return result.rows[0];
+}
+
+export async function updateReportStatus(id, status, handledBy) {
+  await pool.query(
+    `
+      UPDATE reports
+      SET status = $1, handled_by = $2, handled_at = $3
+      WHERE id = $4
+    `,
+    [status, handledBy, Date.now(), id]
+  );
+  await pool.query(`
+    DELETE FROM reports
+    WHERE status != 'open'
+      AND id NOT IN (
+        SELECT id FROM reports
+        ORDER BY created_at DESC
+        LIMIT 1000
+      )
+  `);
 }
 
 export async function createAccount(account) {

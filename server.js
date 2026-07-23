@@ -10,20 +10,26 @@ import { Server } from "socket.io";
 import {
   banNickname,
   createAccount,
+  createReport,
   createRoom,
   deleteRoom,
   getAccountByNickname,
   getDatabaseLabel,
+  getMessageById,
   getPrivateBlockState,
   getPrivateConversation,
+  getPrivateMessageById,
+  getReportById,
   getRoomHistory,
   getRooms,
   initDatabase,
   isBanned,
+  hasOpenReport,
   listAccounts,
   listModerationLogs,
   listPrivateBlocks,
   listPrivateMessagesForAccount,
+  listReports,
   markPrivateMessagesRead,
   savePrivateMessage,
   saveMessage,
@@ -36,6 +42,7 @@ import {
   updateAccountProfile,
   updateAccountRole,
   updateRoomTopic,
+  updateReportStatus,
 } from "./db.js";
 
 const scrypt = promisify(scryptCallback);
@@ -209,6 +216,7 @@ io.on("connection", (socket) => {
       messageTimes: [],
       lastMessage: "",
       cooldownUntil: 0,
+      lastReportAt: 0,
       joinedAt: Date.now(),
     });
 
@@ -220,6 +228,9 @@ io.on("connection", (socket) => {
     if (role === "admin") {
       await sendAccountList(socket);
       await sendModerationLogs(socket);
+    }
+    if (MODERATION_ROLES.has(role)) {
+      await sendReports(socket);
     }
     if (account || cleanAuthMode === "register") {
       await sendPrivateState(socket, normalizedNickname);
@@ -447,6 +458,23 @@ io.on("connection", (socket) => {
     }
 
     await handlePrivateAction(socket, user, payload);
+  });
+
+  socket.on("report-action", async (payload = {}) => {
+    const user = users.get(socket.id);
+    if (!user) return;
+
+    if (payload.action === "create") {
+      await handleCreateReport(socket, user, payload);
+      return;
+    }
+
+    if (!MODERATION_ROLES.has(user.role)) {
+      emitPrivateSystem(socket, "Gestion des signalements reservee a la moderation.");
+      return;
+    }
+
+    await handleReportModeration(socket, user, payload);
   });
 
   socket.on("disconnect", async () => {
@@ -773,6 +801,171 @@ function emitToAccount(accountNickname, event, payload) {
 
 function emitPrivateError(socket, text) {
   socket.emit("private-error", { text });
+}
+
+async function handleCreateReport(socket, user, payload) {
+  if (!user.accountNickname) {
+    socket.emit("report-error", {
+      text: "Les signalements sont reserves aux comptes inscrits.",
+    });
+    return;
+  }
+
+  const now = Date.now();
+  if (now - user.lastReportAt < 15_000) {
+    socket.emit("report-error", {
+      text: "Attends quelques secondes avant d'envoyer un autre signalement.",
+    });
+    return;
+  }
+
+  const allowedKinds = new Set(["profile", "public_message", "private_message"]);
+  const allowedReasons = new Set(["spam", "harassment", "inappropriate", "other"]);
+  const kind = allowedKinds.has(payload.kind) ? payload.kind : "";
+  const reason = allowedReasons.has(payload.reason) ? payload.reason : "other";
+  const details = String(payload.details || "").trim().slice(0, 300);
+
+  if (!kind) {
+    socket.emit("report-error", { text: "Type de signalement invalide." });
+    return;
+  }
+
+  let target = "";
+  let targetDisplay = "";
+  let reference = "";
+  let contentSnapshot = "";
+  let room = "";
+
+  if (kind === "public_message") {
+    const message = await getMessageById(String(payload.messageId || ""));
+    if (!message || message.type === "system") {
+      socket.emit("report-error", { text: "Ce message n'est plus disponible." });
+      return;
+    }
+
+    target = normalizeName(message.nickname);
+    targetDisplay = message.nickname;
+    reference = `public_message:${message.id}`;
+    contentSnapshot = message.text;
+    room = `#${message.room}`;
+  }
+
+  if (kind === "private_message") {
+    const message = await getPrivateMessageById(String(payload.messageId || ""));
+    if (!message || message.recipient !== user.accountNickname) {
+      socket.emit("report-error", { text: "Ce message prive ne peut pas etre signale." });
+      return;
+    }
+
+    const sender = await getAccountByNickname(message.sender);
+    if (!sender) {
+      socket.emit("report-error", { text: "Le compte concerne n'existe plus." });
+      return;
+    }
+
+    target = sender.nickname;
+    targetDisplay = sender.displayName;
+    reference = `private_message:${message.id}`;
+    contentSnapshot = message.text;
+    room = "Message prive";
+  }
+
+  if (kind === "profile") {
+    target = normalizeName(payload.target);
+    if (!target) {
+      socket.emit("report-error", { text: "Ce profil est introuvable." });
+      return;
+    }
+
+    const account = await getAccountByNickname(target);
+    const connectedTarget = findUserByNickname(payload.target);
+    if (!account && !connectedTarget) {
+      socket.emit("report-error", { text: "Ce profil est introuvable." });
+      return;
+    }
+
+    targetDisplay = account?.displayName || connectedTarget[1].nickname;
+    reference = `profile:${target}`;
+    contentSnapshot = account?.bio || `Profil de ${targetDisplay}`;
+    room = `#${user.room}`;
+  }
+
+  if (target === user.accountNickname || normalizeName(targetDisplay) === user.accountNickname) {
+    socket.emit("report-error", { text: "Tu ne peux pas te signaler toi-meme." });
+    return;
+  }
+
+  if (await hasOpenReport(user.accountNickname, reference)) {
+    socket.emit("report-error", {
+      text: "Tu as deja un signalement ouvert pour cet element.",
+    });
+    return;
+  }
+
+  await createReport({
+    id: crypto.randomUUID(),
+    reporter: user.accountNickname,
+    reporterDisplay: user.nickname,
+    target,
+    targetDisplay,
+    kind,
+    reference,
+    reason,
+    details,
+    contentSnapshot,
+    room,
+    createdAt: now,
+  });
+  user.lastReportAt = now;
+  socket.emit("report-created");
+  await publishReports();
+}
+
+async function handleReportModeration(socket, moderator, payload) {
+  if (payload.action === "list") {
+    await sendReports(socket);
+    return;
+  }
+
+  const status =
+    payload.action === "resolve"
+      ? "resolved"
+      : payload.action === "dismiss"
+        ? "dismissed"
+        : "";
+  if (!status) return;
+
+  const report = await getReportById(String(payload.id || ""));
+  if (!report || report.status !== "open") {
+    emitPrivateSystem(socket, "Ce signalement a deja ete traite ou n'existe plus.");
+    return;
+  }
+
+  await updateReportStatus(report.id, status, moderator.nickname);
+  await recordModerationAction(
+    moderator,
+    status === "resolved" ? "report_resolved" : "report_dismissed",
+    report.targetDisplay,
+    `${report.kind} - ${report.reason}`
+  );
+  emitPrivateSystem(
+    socket,
+    status === "resolved" ? "Signalement marque comme traite." : "Signalement rejete."
+  );
+  await publishReports();
+}
+
+async function sendReports(socket) {
+  socket.emit("reports", await listReports(100));
+}
+
+async function publishReports() {
+  const reports = await listReports(100);
+  for (const [socketId, connectedUser] of users.entries()) {
+    if (MODERATION_ROLES.has(connectedUser.role)) {
+      io.to(socketId).emit("reports", reports);
+    }
+  }
 }
 
 async function sendAccountList(socket) {
