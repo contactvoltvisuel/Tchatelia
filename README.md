@@ -14,6 +14,9 @@ Prerequis : Node.js 24 ou plus recent.
 - Interface responsive avec panneaux de salons et de membres adaptes au mobile.
 - Centre de moderation dans une fenetre dediee.
 - Messages instantanes avec Socket.IO.
+- Mentions avec `@pseudo`, mise en evidence et alerte cliquable.
+- Compteurs de messages non lus pour chaque salon et dans l'onglet du navigateur.
+- Alertes visuelles, sonores et notifications navigateur activables.
 - Liste des personnes connectees dans le salon.
 - Connexion admin avec mot de passe.
 - Role moderateur : kick, ban et unban sans acces a la gestion complete.

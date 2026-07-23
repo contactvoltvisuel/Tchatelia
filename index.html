@@ -186,6 +186,16 @@
                 <span class="button-label">Profil</span>
               </button>
               <button
+                class="ghost-button notification-toggle"
+                id="notificationToggleButton"
+                type="button"
+                title="Activer les alertes"
+              >
+                <span aria-hidden="true">&#9673;</span>
+                <span class="button-label">Alertes</span>
+                <span class="notification-state" id="notificationState">off</span>
+              </button>
+              <button
                 class="icon-button mobile-panel-button"
                 id="membersPanelButton"
                 type="button"
@@ -245,6 +255,13 @@
         </aside>
       </section>
     </main>
+
+    <div
+      class="notification-stack"
+      id="notificationStack"
+      aria-live="polite"
+      aria-label="Notifications"
+    ></div>
 
     <dialog class="admin-dialog" id="adminDialog">
       <header class="admin-dialog-header">

@@ -85,6 +85,9 @@ const sidebarProfileButton = document.querySelector("#sidebarProfileButton");
 const adminPanelButton = document.querySelector("#adminPanelButton");
 const adminDialog = document.querySelector("#adminDialog");
 const adminCloseButton = document.querySelector("#adminCloseButton");
+const notificationToggleButton = document.querySelector("#notificationToggleButton");
+const notificationState = document.querySelector("#notificationState");
+const notificationStack = document.querySelector("#notificationStack");
 
 let currentRoom = "accueil";
 let currentNickname = "";
@@ -103,6 +106,14 @@ let privateConversations = [];
 let activePrivateAccount = "";
 let activePrivateBlockedByMe = false;
 let pendingReport = null;
+let currentRooms = [];
+let privateUnreadTotal = 0;
+let audioContext = null;
+let alertsEnabled =
+  typeof Notification !== "undefined" &&
+  Notification.permission === "granted" &&
+  localStorage.getItem("tchateliaAlerts") === "enabled";
+const unreadByRoom = new Map();
 
 loginForm.addEventListener("submit", (event) => {
   event.preventDefault();
@@ -156,6 +167,43 @@ privateMessagesButton.addEventListener("click", () => {
   openPrivateMessages();
 });
 
+notificationToggleButton.addEventListener("click", async () => {
+  if (alertsEnabled) {
+    alertsEnabled = false;
+    localStorage.removeItem("tchateliaAlerts");
+    updateNotificationButton();
+    showNotificationToast("Alertes desactivees", "Les compteurs non lus restent actifs.");
+    return;
+  }
+
+  if (typeof Notification === "undefined") {
+    showNotificationToast(
+      "Notifications indisponibles",
+      "Ce navigateur ne prend pas en charge les notifications."
+    );
+    return;
+  }
+
+  const permission =
+    Notification.permission === "default"
+      ? await Notification.requestPermission()
+      : Notification.permission;
+
+  if (permission !== "granted") {
+    showNotificationToast(
+      "Autorisation refusee",
+      "Tu peux modifier ce choix dans les reglages du navigateur."
+    );
+    return;
+  }
+
+  alertsEnabled = true;
+  localStorage.setItem("tchateliaAlerts", "enabled");
+  ensureAudioContext();
+  updateNotificationButton();
+  showNotificationToast("Alertes activees", "Les mentions et messages prives seront signales.");
+});
+
 sidebarProfileButton.addEventListener("click", () => {
   requestProfile(currentNickname);
 });
@@ -185,6 +233,12 @@ adminCloseButton.addEventListener("click", () => {
 adminDialog.addEventListener("click", (event) => {
   if (event.target === adminDialog) adminDialog.close();
 });
+
+document.addEventListener("visibilitychange", () => {
+  if (!document.hidden) markCurrentRoomRead();
+});
+
+window.addEventListener("focus", markCurrentRoomRead);
 
 profileCloseButton.addEventListener("click", () => {
   profileDialog.close();
@@ -400,6 +454,26 @@ socket.on("message", (message) => {
   scrollToLatest();
 });
 
+socket.on("room-activity", (activity) => {
+  const roomIsOpen = activity.room === currentRoom;
+  const pageIsVisible = !document.hidden && document.hasFocus();
+
+  if (!roomIsOpen || !pageIsVisible) {
+    unreadByRoom.set(activity.room, (unreadByRoom.get(activity.room) || 0) + 1);
+    renderRoomList();
+    updateDocumentTitle();
+  }
+
+  if (activity.mentioned) {
+    notifyUser(
+      `Mention de ${activity.nickname}`,
+      `#${activity.room} - ${activity.text}`,
+      `mention-${activity.id}`,
+      () => switchRoom(activity.room)
+    );
+  }
+});
+
 socket.on("users", (users) => {
   currentUsers = users;
   const me = users.find((user) => user.nickname === currentNickname);
@@ -449,12 +523,39 @@ socket.on("moderated", ({ reason }) => {
 });
 
 socket.on("rooms", (rooms) => {
+  currentRooms = rooms;
+  renderRoomList();
+});
+
+function renderRoomList() {
   roomList.innerHTML = "";
-  rooms.forEach((room) => {
+  currentRooms.forEach((room) => {
     const button = document.createElement("button");
     button.type = "button";
     button.className = room.name === currentRoom ? "room active" : "room";
-    button.innerHTML = `<span>#${escapeHtml(room.name)}</span><small>${room.users}</small>`;
+
+    const name = document.createElement("span");
+    name.textContent = `#${room.name}`;
+
+    const stats = document.createElement("span");
+    stats.className = "room-stats";
+
+    const users = document.createElement("small");
+    users.className = "room-user-count";
+    users.textContent = String(room.users);
+    users.title = `${room.users} connecte${room.users > 1 ? "s" : ""}`;
+    stats.append(users);
+
+    const unread = unreadByRoom.get(room.name) || 0;
+    if (unread > 0) {
+      const unreadBadge = document.createElement("small");
+      unreadBadge.className = "room-unread-count";
+      unreadBadge.textContent = unread > 99 ? "99+" : String(unread);
+      unreadBadge.title = `${unread} message${unread > 1 ? "s" : ""} non lu${unread > 1 ? "s" : ""}`;
+      stats.append(unreadBadge);
+    }
+
+    button.append(name, stats);
     button.title = room.topic;
     button.addEventListener("click", () => {
       switchRoom(room.name);
@@ -462,7 +563,7 @@ socket.on("rooms", (rooms) => {
     });
     roomList.append(button);
   });
-});
+}
 
 socket.on("room-updated", ({ room, topic }) => {
   currentRoom = room;
@@ -507,7 +608,9 @@ socket.on("profile", (profile) => {
 
 socket.on("private-state", (state) => {
   privateConversations = state.conversations;
+  privateUnreadTotal = state.totalUnread;
   renderPrivateState(state.totalUnread);
+  updateDocumentTitle();
 });
 
 socket.on("private-conversation", (conversation) => {
@@ -529,6 +632,19 @@ socket.on("private-message", (message) => {
       });
     }
   }
+
+  if (!message.fromMe) {
+    const conversationIsOpen =
+      privateDialog.open && activePrivateAccount === message.counterpartAccount;
+    if (!conversationIsOpen || document.hidden || !document.hasFocus()) {
+      notifyUser(
+        `Message prive de ${message.counterpartNickname}`,
+        message.text,
+        `private-${message.id}`,
+        () => openPrivateMessages(message.counterpartAccount)
+      );
+    }
+  }
 });
 
 socket.on("private-block-changed", ({ nickname }) => {
@@ -545,10 +661,19 @@ socket.on("private-error", ({ text }) => {
 });
 
 function switchRoom(room) {
+  if (room === currentRoom) {
+    markCurrentRoomRead();
+    return;
+  }
+
   socket.emit("switch-room", room, (response) => {
+    if (!response?.ok) return;
     currentRoom = response.room;
     roomName.textContent = `#${response.room}`;
     roomTopic.textContent = response.topic;
+    unreadByRoom.delete(response.room);
+    renderRoomList();
+    updateDocumentTitle();
   });
 }
 
@@ -574,8 +699,18 @@ function showChat(response) {
   privateMessagesButton.classList.toggle("hidden", !currentAccount);
   sidebarProfileButton.classList.toggle("hidden", !currentAccount);
   updateCurrentUserSummary();
+  markCurrentRoomRead();
+  updateNotificationButton();
   renderAdminPanel();
   messageInput.focus();
+}
+
+function markCurrentRoomRead() {
+  if (!currentRoom || document.hidden) return;
+  if (unreadByRoom.delete(currentRoom)) {
+    renderRoomList();
+  }
+  updateDocumentTitle();
 }
 
 function updateCurrentUserSummary() {
@@ -1094,8 +1229,10 @@ function openPrivateMessages(accountNickname = "") {
 }
 
 function renderPrivateState(totalUnread) {
+  privateUnreadTotal = totalUnread;
   privateUnreadBadge.textContent = totalUnread;
   privateUnreadBadge.classList.toggle("hidden", totalUnread === 0);
+  updateDocumentTitle();
   privateConversationList.innerHTML = "";
 
   if (!privateConversations.length) {
@@ -1272,6 +1409,130 @@ function resizeAvatar(file) {
   });
 }
 
+function updateNotificationButton() {
+  notificationToggleButton.classList.toggle("is-enabled", alertsEnabled);
+  notificationToggleButton.setAttribute("aria-pressed", String(alertsEnabled));
+  notificationToggleButton.title = alertsEnabled
+    ? "Desactiver les alertes"
+    : "Activer les alertes";
+  notificationState.textContent = alertsEnabled ? "on" : "off";
+}
+
+function updateDocumentTitle() {
+  const roomUnread = [...unreadByRoom.values()].reduce(
+    (total, unread) => total + unread,
+    0
+  );
+  const totalUnread = roomUnread + privateUnreadTotal;
+  document.title = totalUnread > 0 ? `(${totalUnread}) Tchatelia` : "Tchatelia";
+}
+
+function ensureAudioContext() {
+  const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+  if (!AudioContextClass) return null;
+  if (!audioContext) audioContext = new AudioContextClass();
+  if (audioContext.state === "suspended") audioContext.resume();
+  return audioContext;
+}
+
+function playNotificationSound() {
+  if (!alertsEnabled) return;
+  const context = ensureAudioContext();
+  if (!context) return;
+
+  const oscillator = context.createOscillator();
+  const gain = context.createGain();
+  oscillator.type = "sine";
+  oscillator.frequency.setValueAtTime(740, context.currentTime);
+  oscillator.frequency.exponentialRampToValueAtTime(520, context.currentTime + 0.12);
+  gain.gain.setValueAtTime(0.0001, context.currentTime);
+  gain.gain.exponentialRampToValueAtTime(0.08, context.currentTime + 0.015);
+  gain.gain.exponentialRampToValueAtTime(0.0001, context.currentTime + 0.16);
+  oscillator.connect(gain);
+  gain.connect(context.destination);
+  oscillator.start();
+  oscillator.stop(context.currentTime + 0.17);
+}
+
+function showNotificationToast(title, text, action = null) {
+  const toast = document.createElement("button");
+  toast.type = "button";
+  toast.className = "notification-toast";
+
+  const heading = document.createElement("strong");
+  heading.textContent = title;
+
+  const body = document.createElement("span");
+  body.textContent = text;
+
+  toast.append(heading, body);
+  toast.addEventListener("click", () => {
+    toast.remove();
+    action?.();
+  });
+  notificationStack.prepend(toast);
+
+  while (notificationStack.children.length > 4) {
+    notificationStack.lastElementChild.remove();
+  }
+
+  window.setTimeout(() => toast.remove(), 6000);
+}
+
+function notifyUser(title, text, tag, action = null) {
+  showNotificationToast(title, text, action);
+  playNotificationSound();
+
+  if (
+    !alertsEnabled ||
+    typeof Notification === "undefined" ||
+    Notification.permission !== "granted"
+  ) {
+    return;
+  }
+
+  const notification = new Notification(title, {
+    body: text,
+    tag,
+  });
+  notification.addEventListener("click", () => {
+    window.focus();
+    action?.();
+    notification.close();
+  });
+}
+
+function appendTextWithMentions(container, text) {
+  const mentionPattern = /@([\p{L}\p{N}_-]{1,18})/gu;
+  let previousIndex = 0;
+
+  for (const match of String(text || "").matchAll(mentionPattern)) {
+    container.append(document.createTextNode(text.slice(previousIndex, match.index)));
+
+    const mention = document.createElement("span");
+    mention.className =
+      normalizeMentionName(match[1]) === normalizeMentionName(currentNickname)
+        ? "mention is-me"
+        : "mention";
+    mention.textContent = match[0];
+    container.append(mention);
+    previousIndex = match.index + match[0].length;
+  }
+
+  container.append(document.createTextNode(text.slice(previousIndex)));
+}
+
+function normalizeMentionName(value) {
+  return String(value || "").trim().toLocaleLowerCase("fr-FR");
+}
+
+function mentionsCurrentUser(text) {
+  return [...String(text || "").matchAll(/@([\p{L}\p{N}_-]{1,18})/gu)].some(
+    (match) =>
+      normalizeMentionName(match[1]) === normalizeMentionName(currentNickname)
+  );
+}
+
 function renderMessage(message) {
   const row = document.createElement("article");
   row.className = `message ${message.type}`;
@@ -1303,9 +1564,12 @@ function renderMessage(message) {
       <strong>${escapeHtml(message.nickname)}</strong>
       <time>${time}</time>
     </div>
-    <p>${escapeHtml(message.text)}</p>
   `;
+  const paragraph = document.createElement("p");
+  appendTextWithMentions(paragraph, message.text);
+  content.append(paragraph);
   row.append(content);
+  row.classList.toggle("mentions-me", mentionsCurrentUser(message.text));
 
   if (connectedUser?.role === "admin" || connectedUser?.role === "moderator") {
     const role = document.createElement("span");

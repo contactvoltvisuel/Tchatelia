@@ -438,7 +438,7 @@ io.on("connection", (socket) => {
         nickname: user.nickname,
         text: messageText.slice(4),
         createdAt: Date.now(),
-      });
+      }, socket.id);
       return;
     }
 
@@ -448,7 +448,7 @@ io.on("connection", (socket) => {
       nickname: user.nickname,
       text: messageText,
       createdAt: Date.now(),
-    });
+    }, socket.id);
   });
 
   socket.on("admin-action", async ({ action, nickname }) => {
@@ -1415,13 +1415,43 @@ async function handleModeration(socket, admin, action, rawTarget) {
   io.sockets.sockets.get(targetSocketId)?.disconnect(true);
 }
 
-async function addMessage(room, message) {
+async function addMessage(room, message, senderSocketId = "") {
   const currentRoom = rooms.get(room);
   currentRoom.history.push(message);
   currentRoom.history = currentRoom.history.slice(-MAX_HISTORY);
   await saveMessage(room, message);
   await trimRoomHistory(room);
   io.to(room).emit("message", message);
+  if (message.type !== "system") {
+    publishRoomActivity(room, message, senderSocketId);
+  }
+}
+
+function publishRoomActivity(room, message, senderSocketId) {
+  const mentionedNames = new Set(
+    [...String(message.text || "").matchAll(/@([\p{L}\p{N}_-]{1,18})/gu)].map(
+      (match) => normalizeName(match[1])
+    )
+  );
+
+  for (const [socketId, connectedUser] of users.entries()) {
+    if (socketId === senderSocketId) continue;
+
+    const normalizedNickname = normalizeName(connectedUser.nickname);
+    const mentioned =
+      mentionedNames.has(normalizedNickname) ||
+      (connectedUser.accountNickname &&
+        mentionedNames.has(normalizeName(connectedUser.accountNickname)));
+
+    io.to(socketId).emit("room-activity", {
+      id: message.id,
+      room,
+      nickname: message.nickname,
+      text: message.text.slice(0, 160),
+      createdAt: message.createdAt,
+      mentioned,
+    });
+  }
 }
 
 async function sendSystem(room, text) {
