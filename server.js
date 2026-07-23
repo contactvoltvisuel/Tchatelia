@@ -73,6 +73,30 @@ app.get("/", (request, response) => {
   response.sendFile(existsSync(publicIndex) ? publicIndex : rootIndex);
 });
 
+app.get("/avatar/:nickname", async (request, response) => {
+  const account = await getAccountByNickname(normalizeName(request.params.nickname));
+  const avatarUrl = account?.avatarUrl || "";
+
+  if (!avatarUrl) {
+    response.sendStatus(404);
+    return;
+  }
+
+  if (avatarUrl.startsWith("data:image/")) {
+    const match = avatarUrl.match(/^data:image\/(jpeg|png|webp);base64,([A-Za-z0-9+/=]+)$/);
+    if (!match) {
+      response.sendStatus(404);
+      return;
+    }
+
+    response.set("Cache-Control", "no-store");
+    response.type(`image/${match[1]}`).send(Buffer.from(match[2], "base64"));
+    return;
+  }
+
+  response.redirect(302, avatarUrl);
+});
+
 io.on("connection", (socket) => {
   socket.on("join", async ({ nickname, room, adminPassword, accountPassword, authMode }, callback) => {
     const cleanNickname = cleanName(nickname);
@@ -461,8 +485,18 @@ function cleanTopic(value) {
 }
 
 function cleanAvatarUrl(value) {
-  const cleanValue = String(value || "").trim().slice(0, 500);
+  const cleanValue = String(value || "").trim();
   if (!cleanValue) return "";
+
+  const imageData = cleanValue.match(
+    /^data:image\/(jpeg|png|webp);base64,([A-Za-z0-9+/=]+)$/
+  );
+  if (imageData) {
+    if (Buffer.byteLength(imageData[2], "base64") > 250 * 1024) return null;
+    return cleanValue;
+  }
+
+  if (cleanValue.length > 500) return null;
 
   try {
     const url = new URL(cleanValue);
@@ -854,7 +888,10 @@ function publishUsers(room) {
       nickname: user.nickname,
       role: user.role,
       account: user.account,
-      avatarUrl: user.avatarUrl,
+      avatarUrl:
+        user.avatarUrl && user.accountNickname
+          ? `/avatar/${encodeURIComponent(user.accountNickname)}`
+          : "",
     }))
     .sort((a, b) => a.nickname.localeCompare(b.nickname));
 

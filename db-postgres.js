@@ -101,8 +101,7 @@ export async function getAccountByNickname(nickname) {
 
 export async function listAccounts() {
   const result = await pool.query(`
-    SELECT nickname, display_name AS "displayName", role, active, bio,
-      avatar_url AS "avatarUrl", created_at AS "createdAt"
+    SELECT nickname, display_name AS "displayName", role, active, created_at AS "createdAt"
     FROM accounts
     ORDER BY created_at DESC
   `);

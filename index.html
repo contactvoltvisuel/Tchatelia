@@ -188,13 +188,22 @@
       </div>
       <p class="profile-bio" id="profileBio"></p>
       <form class="profile-form hidden" id="profileForm">
-        <label for="profileAvatarInput">Lien de l'avatar</label>
+        <label for="profileAvatarFileInput">Photo depuis l'ordinateur</label>
+        <input
+          id="profileAvatarFileInput"
+          type="file"
+          accept="image/jpeg,image/png,image/webp"
+        />
+        <label for="profileAvatarInput">Ou lien direct vers une image</label>
         <input
           id="profileAvatarInput"
           type="url"
           maxlength="500"
           placeholder="https://..."
         />
+        <button class="profile-remove-avatar" id="profileRemoveAvatarButton" type="button">
+          Retirer la photo
+        </button>
         <label for="profileBioInput">Description</label>
         <textarea id="profileBioInput" maxlength="180" rows="4"></textarea>
         <button type="submit">Enregistrer</button>

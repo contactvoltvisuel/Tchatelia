@@ -37,7 +37,9 @@ const profileNickname = document.querySelector("#profileNickname");
 const profileMemberSince = document.querySelector("#profileMemberSince");
 const profileBio = document.querySelector("#profileBio");
 const profileForm = document.querySelector("#profileForm");
+const profileAvatarFileInput = document.querySelector("#profileAvatarFileInput");
 const profileAvatarInput = document.querySelector("#profileAvatarInput");
+const profileRemoveAvatarButton = document.querySelector("#profileRemoveAvatarButton");
 const profileBioInput = document.querySelector("#profileBioInput");
 
 let currentRoom = "accueil";
@@ -47,6 +49,7 @@ let currentAccount = false;
 let currentUsers = [];
 let currentAccounts = [];
 let currentModerationLogs = [];
+let selectedAvatar = null;
 
 loginForm.addEventListener("submit", (event) => {
   event.preventDefault();
@@ -105,8 +108,51 @@ profileForm.addEventListener("submit", (event) => {
   socket.emit("profile-action", {
     action: "update",
     bio: profileBioInput.value,
-    avatarUrl: profileAvatarInput.value,
+    avatarUrl: selectedAvatar === null ? profileAvatarInput.value : selectedAvatar,
   });
+});
+
+profileAvatarFileInput.addEventListener("change", async () => {
+  const file = profileAvatarFileInput.files[0];
+  if (!file) return;
+
+  if (!["image/jpeg", "image/png", "image/webp"].includes(file.type)) {
+    alert("Choisis une image JPG, PNG ou WebP.");
+    profileAvatarFileInput.value = "";
+    return;
+  }
+
+  if (file.size > 8 * 1024 * 1024) {
+    alert("Cette image est trop lourde. La taille maximale est de 8 Mo.");
+    profileAvatarFileInput.value = "";
+    return;
+  }
+
+  try {
+    selectedAvatar = await resizeAvatar(file);
+    profileAvatarInput.value = "";
+    setAvatar(profileAvatarImage, profileAvatarFallback, selectedAvatar, currentNickname);
+  } catch {
+    alert("Impossible de lire cette image.");
+    profileAvatarFileInput.value = "";
+  }
+});
+
+profileAvatarInput.addEventListener("change", () => {
+  selectedAvatar = null;
+  setAvatar(
+    profileAvatarImage,
+    profileAvatarFallback,
+    profileAvatarInput.value.trim(),
+    currentNickname
+  );
+});
+
+profileRemoveAvatarButton.addEventListener("click", () => {
+  selectedAvatar = "";
+  profileAvatarFileInput.value = "";
+  profileAvatarInput.value = "";
+  setAvatar(profileAvatarImage, profileAvatarFallback, "", currentNickname);
 });
 
 adminUnbanForm.addEventListener("submit", (event) => {
@@ -499,7 +545,9 @@ function renderProfile(profile) {
 
   profileForm.classList.toggle("hidden", !profile.isOwn);
   if (profile.isOwn) {
-    profileAvatarInput.value = profile.avatarUrl || "";
+    selectedAvatar = profile.avatarUrl?.startsWith("data:image/") ? profile.avatarUrl : null;
+    profileAvatarFileInput.value = "";
+    profileAvatarInput.value = selectedAvatar === null ? profile.avatarUrl || "" : "";
     profileBioInput.value = profile.bio || "";
   }
 
@@ -541,6 +589,54 @@ function setAvatar(image, fallback, avatarUrl, nickname) {
 
 function getInitials(nickname) {
   return String(nickname || "?").slice(0, 2).toUpperCase();
+}
+
+function resizeAvatar(file) {
+  return new Promise((resolve, reject) => {
+    const image = new Image();
+    const objectUrl = URL.createObjectURL(file);
+
+    image.onload = () => {
+      URL.revokeObjectURL(objectUrl);
+
+      const canvas = document.createElement("canvas");
+      const size = 320;
+      const sourceSize = Math.min(image.naturalWidth, image.naturalHeight);
+      const sourceX = (image.naturalWidth - sourceSize) / 2;
+      const sourceY = (image.naturalHeight - sourceSize) / 2;
+      canvas.width = size;
+      canvas.height = size;
+
+      const context = canvas.getContext("2d");
+      context.fillStyle = "#ffffff";
+      context.fillRect(0, 0, size, size);
+      context.drawImage(
+        image,
+        sourceX,
+        sourceY,
+        sourceSize,
+        sourceSize,
+        0,
+        0,
+        size,
+        size
+      );
+
+      const avatar = canvas.toDataURL("image/jpeg", 0.82);
+      if (avatar.length > 340_000) {
+        reject(new Error("Compressed image is too large"));
+        return;
+      }
+      resolve(avatar);
+    };
+
+    image.onerror = () => {
+      URL.revokeObjectURL(objectUrl);
+      reject(new Error("Invalid image"));
+    };
+
+    image.src = objectUrl;
+  });
 }
 
 function renderMessage(message) {
