@@ -19,6 +19,7 @@
 body {
   margin: 0;
   min-height: 100vh;
+  overflow: hidden;
   color: var(--ink);
   background:
     linear-gradient(135deg, rgba(15, 118, 110, 0.13), transparent 36%),
@@ -38,10 +39,11 @@ button {
 }
 
 .shell {
-  min-height: 100vh;
+  height: 100vh;
   display: grid;
   place-items: center;
   padding: 24px;
+  overflow: hidden;
 }
 
 .hidden {
@@ -153,6 +155,7 @@ button:hover {
   padding: 22px;
   border-right: 1px solid var(--line);
   background: #fbfaf7;
+  overflow-y: auto;
 }
 
 .brand {
@@ -224,6 +227,7 @@ button:hover {
 
 .conversation {
   min-width: 0;
+  min-height: 0;
   display: grid;
   grid-template-rows: auto 1fr auto;
   background: var(--panel);
@@ -256,10 +260,12 @@ button:hover {
 }
 
 .messages {
+  min-height: 0;
   display: flex;
   flex-direction: column;
   gap: 12px;
   overflow-y: auto;
+  overscroll-behavior: contain;
   padding: 22px 24px;
   background:
     linear-gradient(rgba(255, 255, 255, 0.84), rgba(255, 255, 255, 0.84)),
@@ -316,6 +322,8 @@ button:hover {
   padding: 18px 24px;
   border-top: 1px solid var(--line);
   background: #fbfaf7;
+  position: sticky;
+  bottom: 0;
 }
 
 @media (max-width: 760px) {
