@@ -26,6 +26,7 @@ import {
   trimRoomHistory,
   unbanNickname,
   updateAccountPassword,
+  updateAccountProfile,
   updateAccountRole,
   updateRoomTopic,
 } from "./db.js";
@@ -171,6 +172,9 @@ io.on("connection", (socket) => {
       role,
       account: Boolean(account || cleanAuthMode === "register"),
       accountNickname: account || cleanAuthMode === "register" ? normalizedNickname : null,
+      bio: account?.bio || "",
+      avatarUrl: account?.avatarUrl || "",
+      memberSince: account?.createdAt || Date.now(),
       messageTimes: [],
       lastMessage: "",
       cooldownUntil: 0,
@@ -192,6 +196,7 @@ io.on("connection", (socket) => {
       nickname: displayName,
       room: cleanRoom,
       role,
+      account: Boolean(account || cleanAuthMode === "register"),
       topic: rooms.get(cleanRoom).topic,
     });
   });
@@ -362,6 +367,41 @@ io.on("connection", (socket) => {
     if (action === "list") await sendModerationLogs(socket);
   });
 
+  socket.on("profile-action", async ({ action, nickname, bio, avatarUrl } = {}) => {
+    const user = users.get(socket.id);
+    if (!user) return;
+
+    if (action === "get") {
+      await sendProfile(socket, user, nickname);
+      return;
+    }
+
+    if (action !== "update") return;
+    if (!user.accountNickname) {
+      emitPrivateSystem(socket, "Cree un compte pour personnaliser ton profil.");
+      return;
+    }
+
+    const cleanBio = String(bio || "").trim().slice(0, 180);
+    const cleanAvatar = cleanAvatarUrl(avatarUrl);
+    if (cleanAvatar === null) {
+      emitPrivateSystem(socket, "Le lien de l'avatar doit etre une adresse http ou https valide.");
+      return;
+    }
+
+    await updateAccountProfile(user.accountNickname, {
+      bio: cleanBio,
+      avatarUrl: cleanAvatar,
+    });
+    updateConnectedAccount(user.accountNickname, {
+      bio: cleanBio,
+      avatarUrl: cleanAvatar,
+    });
+    for (const room of rooms.keys()) publishUsers(room);
+    emitPrivateSystem(socket, "Ton profil a ete mis a jour.");
+    await sendProfile(socket, user, user.nickname);
+  });
+
   socket.on("disconnect", async () => {
     const user = users.get(socket.id);
     if (!user) return;
@@ -418,6 +458,58 @@ function cleanRoomName(value) {
 
 function cleanTopic(value) {
   return String(value || "Salon public Tchatelia.").trim().slice(0, 90);
+}
+
+function cleanAvatarUrl(value) {
+  const cleanValue = String(value || "").trim().slice(0, 500);
+  if (!cleanValue) return "";
+
+  try {
+    const url = new URL(cleanValue);
+    if (!["http:", "https:"].includes(url.protocol) || url.username || url.password) return null;
+    return url.toString();
+  } catch {
+    return null;
+  }
+}
+
+async function sendProfile(socket, viewer, rawNickname) {
+  const nickname = normalizeName(rawNickname);
+  if (!nickname) {
+    emitPrivateSystem(socket, "Profil introuvable.");
+    return;
+  }
+
+  const account = await getAccountByNickname(nickname);
+  if (account) {
+    socket.emit("profile", {
+      nickname: account.displayName,
+      role: account.role,
+      bio: account.bio,
+      avatarUrl: account.avatarUrl,
+      createdAt: account.createdAt,
+      account: true,
+      isOwn: viewer.accountNickname === account.nickname,
+    });
+    return;
+  }
+
+  const targetEntry = findUserByNickname(rawNickname);
+  if (!targetEntry) {
+    emitPrivateSystem(socket, "Profil introuvable.");
+    return;
+  }
+
+  const target = targetEntry[1];
+  socket.emit("profile", {
+    nickname: target.nickname,
+    role: target.role,
+    bio: "",
+    avatarUrl: "",
+    createdAt: target.memberSince,
+    account: false,
+    isOwn: false,
+  });
 }
 
 async function sendAccountList(socket) {
@@ -761,6 +853,8 @@ function publishUsers(room) {
     .map((user) => ({
       nickname: user.nickname,
       role: user.role,
+      account: user.account,
+      avatarUrl: user.avatarUrl,
     }))
     .sort((a, b) => a.nickname.localeCompare(b.nickname));
 

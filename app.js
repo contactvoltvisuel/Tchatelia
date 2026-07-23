@@ -26,11 +26,24 @@ const adminRefreshLogsButton = document.querySelector("#adminRefreshLogsButton")
 const adminModerationLogList = document.querySelector("#adminModerationLogList");
 const roomName = document.querySelector("#roomName");
 const roomTopic = document.querySelector("#roomTopic");
+const myProfileButton = document.querySelector("#myProfileButton");
 const leaveButton = document.querySelector("#leaveButton");
+const profileDialog = document.querySelector("#profileDialog");
+const profileCloseButton = document.querySelector("#profileCloseButton");
+const profileAvatarImage = document.querySelector("#profileAvatarImage");
+const profileAvatarFallback = document.querySelector("#profileAvatarFallback");
+const profileRole = document.querySelector("#profileRole");
+const profileNickname = document.querySelector("#profileNickname");
+const profileMemberSince = document.querySelector("#profileMemberSince");
+const profileBio = document.querySelector("#profileBio");
+const profileForm = document.querySelector("#profileForm");
+const profileAvatarInput = document.querySelector("#profileAvatarInput");
+const profileBioInput = document.querySelector("#profileBioInput");
 
 let currentRoom = "accueil";
 let currentNickname = "";
 let currentRole = "user";
+let currentAccount = false;
 let currentUsers = [];
 let currentAccounts = [];
 let currentModerationLogs = [];
@@ -58,6 +71,7 @@ loginForm.addEventListener("submit", (event) => {
       currentRoom = response.room;
       currentNickname = response.nickname;
       currentRole = response.role;
+      currentAccount = response.account;
       showChat(response);
     }
   );
@@ -72,6 +86,27 @@ messageForm.addEventListener("submit", (event) => {
 
 leaveButton.addEventListener("click", () => {
   window.location.reload();
+});
+
+myProfileButton.addEventListener("click", () => {
+  requestProfile(currentNickname);
+});
+
+profileCloseButton.addEventListener("click", () => {
+  profileDialog.close();
+});
+
+profileDialog.addEventListener("click", (event) => {
+  if (event.target === profileDialog) profileDialog.close();
+});
+
+profileForm.addEventListener("submit", (event) => {
+  event.preventDefault();
+  socket.emit("profile-action", {
+    action: "update",
+    bio: profileBioInput.value,
+    avatarUrl: profileAvatarInput.value,
+  });
 });
 
 adminUnbanForm.addEventListener("submit", (event) => {
@@ -159,8 +194,20 @@ socket.on("users", (users) => {
   userList.innerHTML = "";
   users.forEach((user) => {
     const item = document.createElement("li");
-    item.textContent = formatUserName(user);
     item.className = user.nickname === currentNickname ? "is-me" : "";
+
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "profile-user-button";
+    button.title = `Voir le profil de ${user.nickname}`;
+    button.append(createAvatar(user, "small"));
+
+    const name = document.createElement("span");
+    name.textContent = formatUserName(user);
+    button.append(name);
+    button.addEventListener("click", () => requestProfile(user.nickname));
+
+    item.append(button);
     userList.append(item);
   });
 
@@ -202,6 +249,10 @@ socket.on("moderation-logs", (logs) => {
   renderModerationLog();
 });
 
+socket.on("profile", (profile) => {
+  renderProfile(profile);
+});
+
 function switchRoom(room) {
   socket.emit("switch-room", room, (response) => {
     currentRoom = response.room;
@@ -215,6 +266,7 @@ function showChat(response) {
   chatPanel.classList.remove("hidden");
   roomName.textContent = `#${response.room}`;
   roomTopic.textContent = response.topic;
+  myProfileButton.classList.toggle("hidden", !currentAccount);
   renderAdminPanel();
   messageInput.focus();
 }
@@ -424,6 +476,71 @@ function formatUserName(user) {
   if (user.role === "admin") return `${user.nickname} admin`;
   if (user.role === "moderator") return `${user.nickname} modo`;
   return user.nickname;
+}
+
+function requestProfile(nickname) {
+  socket.emit("profile-action", {
+    action: "get",
+    nickname,
+  });
+}
+
+function renderProfile(profile) {
+  profileNickname.textContent = profile.nickname;
+  profileRole.textContent = profile.account ? formatRole(profile.role) : "invite";
+  profileBio.textContent = profile.bio || "Aucune description.";
+  profileMemberSince.textContent = profile.account
+    ? `Membre depuis le ${new Intl.DateTimeFormat("fr-FR", { dateStyle: "long" }).format(
+        Number(profile.createdAt)
+      )}`
+    : "Profil invite";
+
+  setAvatar(profileAvatarImage, profileAvatarFallback, profile.avatarUrl, profile.nickname);
+
+  profileForm.classList.toggle("hidden", !profile.isOwn);
+  if (profile.isOwn) {
+    profileAvatarInput.value = profile.avatarUrl || "";
+    profileBioInput.value = profile.bio || "";
+  }
+
+  if (!profileDialog.open) profileDialog.showModal();
+}
+
+function createAvatar(user, size) {
+  const avatar = document.createElement("span");
+  avatar.className = `user-avatar ${size}`;
+
+  const fallback = document.createElement("span");
+  fallback.textContent = getInitials(user.nickname);
+  avatar.append(fallback);
+
+  if (user.avatarUrl) {
+    const image = document.createElement("img");
+    image.alt = "";
+    image.loading = "lazy";
+    image.referrerPolicy = "no-referrer";
+    image.addEventListener("error", () => image.remove());
+    image.src = user.avatarUrl;
+    avatar.append(image);
+  }
+
+  return avatar;
+}
+
+function setAvatar(image, fallback, avatarUrl, nickname) {
+  fallback.textContent = getInitials(nickname);
+  image.hidden = !avatarUrl;
+  image.src = avatarUrl || "";
+  image.onerror = () => {
+    image.hidden = true;
+  };
+  image.onload = () => {
+    image.hidden = false;
+  };
+}
+
+function getInitials(nickname) {
+  return String(nickname || "?").slice(0, 2).toUpperCase();
 }
 
 function renderMessage(message) {

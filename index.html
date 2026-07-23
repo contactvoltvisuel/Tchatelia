@@ -150,7 +150,10 @@
               <p class="eyebrow" id="roomName">#accueil</p>
               <h1 id="roomTopic">Salon general pour discuter librement.</h1>
             </div>
-            <button class="ghost-button" id="leaveButton" type="button">Sortir</button>
+            <div class="chat-header-actions">
+              <button class="ghost-button hidden" id="myProfileButton" type="button">Mon profil</button>
+              <button class="ghost-button" id="leaveButton" type="button">Sortir</button>
+            </div>
           </header>
 
           <div class="messages" id="messages" aria-live="polite"></div>
@@ -167,6 +170,36 @@
         </div>
       </section>
     </main>
+
+    <dialog class="profile-dialog" id="profileDialog">
+      <button class="profile-close-button" id="profileCloseButton" type="button" aria-label="Fermer">
+        X
+      </button>
+      <div class="profile-summary">
+        <div class="profile-avatar">
+          <img id="profileAvatarImage" alt="" referrerpolicy="no-referrer" />
+          <span id="profileAvatarFallback"></span>
+        </div>
+        <div>
+          <p class="eyebrow" id="profileRole"></p>
+          <h2 id="profileNickname"></h2>
+          <p class="profile-member-since" id="profileMemberSince"></p>
+        </div>
+      </div>
+      <p class="profile-bio" id="profileBio"></p>
+      <form class="profile-form hidden" id="profileForm">
+        <label for="profileAvatarInput">Lien de l'avatar</label>
+        <input
+          id="profileAvatarInput"
+          type="url"
+          maxlength="500"
+          placeholder="https://..."
+        />
+        <label for="profileBioInput">Description</label>
+        <textarea id="profileBioInput" maxlength="180" rows="4"></textarea>
+        <button type="submit">Enregistrer</button>
+      </form>
+    </dialog>
 
     <script src="/socket.io/socket.io.js"></script>
     <script src="/app.js"></script>

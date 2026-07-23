@@ -45,6 +45,8 @@ export async function initDatabase() {
       salt TEXT NOT NULL,
       role TEXT NOT NULL,
       active BOOLEAN NOT NULL DEFAULT TRUE,
+      bio TEXT NOT NULL DEFAULT '',
+      avatar_url TEXT NOT NULL DEFAULT '',
       created_at BIGINT NOT NULL
     );
 
@@ -60,6 +62,8 @@ export async function initDatabase() {
   `);
 
   await pool.query("ALTER TABLE accounts ADD COLUMN IF NOT EXISTS active BOOLEAN NOT NULL DEFAULT TRUE");
+  await pool.query("ALTER TABLE accounts ADD COLUMN IF NOT EXISTS bio TEXT NOT NULL DEFAULT ''");
+  await pool.query("ALTER TABLE accounts ADD COLUMN IF NOT EXISTS avatar_url TEXT NOT NULL DEFAULT ''");
 
   for (const [name, topic] of defaultRooms) {
     await pool.query(
@@ -85,7 +89,8 @@ export async function getRooms() {
 export async function getAccountByNickname(nickname) {
   const result = await pool.query(
     `
-      SELECT nickname, display_name AS "displayName", password_hash AS "passwordHash", salt, role, active
+      SELECT nickname, display_name AS "displayName", password_hash AS "passwordHash", salt, role, active,
+        bio, avatar_url AS "avatarUrl", created_at AS "createdAt"
       FROM accounts
       WHERE nickname = $1
     `,
@@ -96,7 +101,8 @@ export async function getAccountByNickname(nickname) {
 
 export async function listAccounts() {
   const result = await pool.query(`
-    SELECT nickname, display_name AS "displayName", role, active, created_at AS "createdAt"
+    SELECT nickname, display_name AS "displayName", role, active, bio,
+      avatar_url AS "avatarUrl", created_at AS "createdAt"
     FROM accounts
     ORDER BY created_at DESC
   `);
@@ -164,6 +170,14 @@ export async function updateAccountPassword(nickname, passwordRecord) {
   await pool.query("UPDATE accounts SET password_hash = $1, salt = $2 WHERE nickname = $3", [
     passwordRecord.passwordHash,
     passwordRecord.salt,
+    nickname,
+  ]);
+}
+
+export async function updateAccountProfile(nickname, profile) {
+  await pool.query("UPDATE accounts SET bio = $1, avatar_url = $2 WHERE nickname = $3", [
+    profile.bio,
+    profile.avatarUrl,
     nickname,
   ]);
 }

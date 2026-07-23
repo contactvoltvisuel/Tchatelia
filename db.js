@@ -23,6 +23,7 @@ export const {
   unbanNickname,
   setAccountActive,
   updateAccountPassword,
+  updateAccountProfile,
   updateAccountRole,
   updateRoomTopic,
 } = database;

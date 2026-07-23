@@ -50,6 +50,8 @@ export async function initDatabase() {
       salt TEXT NOT NULL,
       role TEXT NOT NULL,
       active INTEGER NOT NULL DEFAULT 1,
+      bio TEXT NOT NULL DEFAULT '',
+      avatar_url TEXT NOT NULL DEFAULT '',
       created_at INTEGER NOT NULL
     );
 
@@ -66,6 +68,18 @@ export async function initDatabase() {
 
   try {
     db.exec("ALTER TABLE accounts ADD COLUMN active INTEGER NOT NULL DEFAULT 1");
+  } catch (error) {
+    if (!String(error.message).includes("duplicate column")) throw error;
+  }
+
+  try {
+    db.exec("ALTER TABLE accounts ADD COLUMN bio TEXT NOT NULL DEFAULT ''");
+  } catch (error) {
+    if (!String(error.message).includes("duplicate column")) throw error;
+  }
+
+  try {
+    db.exec("ALTER TABLE accounts ADD COLUMN avatar_url TEXT NOT NULL DEFAULT ''");
   } catch (error) {
     if (!String(error.message).includes("duplicate column")) throw error;
   }
@@ -91,7 +105,8 @@ export async function getRooms() {
 export async function getAccountByNickname(nickname) {
   return db
     .prepare(`
-      SELECT nickname, display_name AS displayName, password_hash AS passwordHash, salt, role, active
+      SELECT nickname, display_name AS displayName, password_hash AS passwordHash, salt, role, active,
+        bio, avatar_url AS avatarUrl, created_at AS createdAt
       FROM accounts
       WHERE nickname = ?
     `)
@@ -101,7 +116,8 @@ export async function getAccountByNickname(nickname) {
 export async function listAccounts() {
   return db
     .prepare(`
-      SELECT nickname, display_name AS displayName, role, active, created_at AS createdAt
+      SELECT nickname, display_name AS displayName, role, active, bio,
+        avatar_url AS avatarUrl, created_at AS createdAt
       FROM accounts
       ORDER BY created_at DESC
     `)
@@ -162,6 +178,14 @@ export async function updateAccountPassword(nickname, passwordRecord) {
   db.prepare("UPDATE accounts SET password_hash = ?, salt = ? WHERE nickname = ?").run(
     passwordRecord.passwordHash,
     passwordRecord.salt,
+    nickname
+  );
+}
+
+export async function updateAccountProfile(nickname, profile) {
+  db.prepare("UPDATE accounts SET bio = ?, avatar_url = ? WHERE nickname = ?").run(
+    profile.bio,
+    profile.avatarUrl,
     nickname
   );
 }
