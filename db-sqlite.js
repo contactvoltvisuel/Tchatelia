@@ -115,6 +115,21 @@ export async function initDatabase() {
 
     CREATE INDEX IF NOT EXISTS reports_reporter_reference_idx
       ON reports (reporter, reference, status);
+
+    CREATE TABLE IF NOT EXISTS contact_messages (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      email TEXT NOT NULL,
+      subject TEXT NOT NULL,
+      message TEXT NOT NULL,
+      status TEXT NOT NULL,
+      handled_by TEXT NOT NULL,
+      created_at INTEGER NOT NULL,
+      handled_at INTEGER
+    );
+
+    CREATE INDEX IF NOT EXISTS contact_messages_status_created_idx
+      ON contact_messages (status, created_at DESC);
   `);
 
   try {
@@ -402,6 +417,59 @@ export async function updateReportStatus(id, status, handledBy) {
         LIMIT 1000
       )
   `);
+  db.prepare("DELETE FROM reports WHERE status != 'open' AND handled_at < ?").run(
+    Date.now() - 730 * 24 * 60 * 60 * 1000
+  );
+}
+
+export async function createContactMessage(contactMessage) {
+  db.prepare(`
+    INSERT INTO contact_messages (
+      id, name, email, subject, message, status, handled_by, created_at, handled_at
+    )
+    VALUES (?, ?, ?, ?, ?, 'open', '', ?, NULL)
+  `).run(
+    contactMessage.id,
+    contactMessage.name,
+    contactMessage.email,
+    contactMessage.subject,
+    contactMessage.message,
+    contactMessage.createdAt
+  );
+}
+
+export async function listContactMessages(limit = 100) {
+  return db
+    .prepare(`
+      SELECT id, name, email, subject, message, status,
+        handled_by AS handledBy, created_at AS createdAt, handled_at AS handledAt
+      FROM contact_messages
+      ORDER BY CASE WHEN status = 'open' THEN 0 ELSE 1 END, created_at DESC
+      LIMIT ?
+    `)
+    .all(limit);
+}
+
+export async function getContactMessageById(id) {
+  return db
+    .prepare(`
+      SELECT id, name, email, subject, message, status,
+        handled_by AS handledBy, created_at AS createdAt, handled_at AS handledAt
+      FROM contact_messages
+      WHERE id = ?
+    `)
+    .get(id);
+}
+
+export async function updateContactMessageStatus(id, status, handledBy) {
+  db.prepare(`
+    UPDATE contact_messages
+    SET status = ?, handled_by = ?, handled_at = ?
+    WHERE id = ?
+  `).run(status, handledBy, Date.now(), id);
+  db.prepare("DELETE FROM contact_messages WHERE status != 'open' AND handled_at < ?").run(
+    Date.now() - 365 * 24 * 60 * 60 * 1000
+  );
 }
 
 export async function createAccount(account) {

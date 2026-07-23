@@ -110,6 +110,35 @@ p {
   font-weight: 700;
 }
 
+.access-consent {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  color: var(--ink) !important;
+  font-weight: 400 !important;
+  line-height: 1.4;
+}
+
+.access-consent input {
+  width: 18px;
+  min-height: 18px;
+  margin-top: 1px;
+}
+
+.access-consent a,
+.login-legal-links a,
+.sidebar-legal-links a {
+  color: var(--accent-dark);
+}
+
+.login-legal-links {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 10px;
+  font-size: 12px;
+}
+
 .auth-mode {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
@@ -366,11 +395,68 @@ button:hover {
 
 .admin-account-panel,
 .admin-moderation-log-panel,
-.admin-report-panel {
+.admin-report-panel,
+.admin-contact-panel {
   display: grid;
   gap: 10px;
   padding-top: 10px;
   border-top: 1px solid var(--line);
+}
+
+.admin-contact-list {
+  max-height: 460px;
+  display: grid;
+  gap: 8px;
+  overflow-y: auto;
+}
+
+.admin-contact {
+  display: grid;
+  gap: 6px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--accent);
+  border-radius: 6px;
+  background: #fff;
+  font-size: 12px;
+}
+
+.admin-contact.resolved {
+  border-left-color: var(--muted);
+  opacity: 0.72;
+}
+
+.admin-contact strong,
+.admin-contact a,
+.admin-contact p,
+.admin-contact small {
+  overflow-wrap: anywhere;
+}
+
+.admin-contact p {
+  margin: 0;
+  padding: 7px;
+  background: var(--paper);
+  line-height: 1.4;
+}
+
+.admin-contact small {
+  color: var(--muted);
+}
+
+.admin-contact button {
+  min-height: 32px;
+  padding: 0 8px;
+  font-size: 11px;
+}
+
+.sidebar-legal-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+  font-size: 11px;
 }
 
 .admin-section-title {

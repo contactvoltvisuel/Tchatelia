@@ -6,10 +6,12 @@ const database = process.env.DATABASE_URL
 
 export const {
   banNickname,
+  createContactMessage,
   createRoom,
   createAccount,
   deleteRoom,
   getAccountByNickname,
+  getContactMessageById,
   getDatabaseLabel,
   getPrivateBlockState,
   getPrivateConversation,
@@ -21,6 +23,7 @@ export const {
   isBanned,
   hasOpenReport,
   listAccounts,
+  listContactMessages,
   listModerationLogs,
   listPrivateBlocks,
   listPrivateMessagesForAccount,
@@ -38,6 +41,7 @@ export const {
   updateAccountPassword,
   updateAccountProfile,
   updateAccountRole,
+  updateContactMessageStatus,
   updateReportStatus,
   updateRoomTopic,
 } = database;

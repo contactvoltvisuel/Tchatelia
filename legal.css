@@ -1,0 +1,270 @@
+:root {
+  color-scheme: light;
+  --ink: #171616;
+  --muted: #66625d;
+  --line: #d9d3ca;
+  --paper: #f8f5ef;
+  --panel: #ffffff;
+  --accent: #0f766e;
+  --accent-dark: #115e59;
+  --warm: #c75c2d;
+  --soft: #eef6f4;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  color: var(--ink);
+  background: var(--paper);
+  font-family: Arial, Helvetica, sans-serif;
+}
+
+a {
+  color: var(--accent-dark);
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}
+
+.legal-header {
+  border-bottom: 1px solid var(--line);
+  background: #fff;
+}
+
+.legal-nav {
+  width: min(1040px, calc(100% - 32px));
+  min-height: 68px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  margin: 0 auto;
+}
+
+.legal-brand {
+  color: var(--ink);
+  font-size: 20px;
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.legal-links {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 14px;
+  font-size: 13px;
+}
+
+.legal-main {
+  width: min(820px, calc(100% - 32px));
+  margin: 0 auto;
+  padding: 52px 0 72px;
+}
+
+.legal-kicker {
+  margin: 0 0 8px;
+  color: var(--accent-dark);
+  font-size: 13px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.legal-main h1 {
+  margin: 0 0 12px;
+  font-size: 48px;
+  line-height: 1;
+}
+
+.legal-intro {
+  margin-bottom: 38px;
+  color: var(--muted);
+  font-size: 18px;
+  line-height: 1.55;
+}
+
+.legal-main section {
+  padding: 26px 0;
+  border-top: 1px solid var(--line);
+}
+
+.legal-main h2 {
+  margin: 0 0 12px;
+  font-size: 21px;
+}
+
+.legal-main h3 {
+  margin: 20px 0 8px;
+  font-size: 16px;
+}
+
+.legal-main p,
+.legal-main li {
+  line-height: 1.65;
+}
+
+.legal-main li + li {
+  margin-top: 7px;
+}
+
+.legal-alert {
+  margin: 24px 0;
+  padding: 16px;
+  border-left: 4px solid var(--warm);
+  background: #fff5ef;
+  line-height: 1.55;
+}
+
+.legal-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 14px;
+}
+
+.legal-table th,
+.legal-table td {
+  padding: 12px;
+  border: 1px solid var(--line);
+  text-align: left;
+  vertical-align: top;
+  line-height: 1.5;
+}
+
+.legal-table th {
+  background: var(--soft);
+}
+
+.contact-form {
+  display: grid;
+  gap: 10px;
+  margin-top: 28px;
+  padding: 24px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+}
+
+.contact-form label {
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.contact-form input,
+.contact-form select,
+.contact-form textarea {
+  width: 100%;
+  min-height: 46px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 10px 12px;
+  color: var(--ink);
+  background: #fff;
+}
+
+.contact-form textarea {
+  min-height: 150px;
+  resize: vertical;
+}
+
+.contact-form input:focus,
+.contact-form select:focus,
+.contact-form textarea:focus {
+  outline: 3px solid rgba(15, 118, 110, 0.16);
+  border-color: var(--accent);
+}
+
+.contact-accept {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  color: var(--ink) !important;
+  font-weight: 400 !important;
+  line-height: 1.45;
+}
+
+.contact-accept input {
+  width: 18px;
+  min-height: 18px;
+  margin-top: 2px;
+}
+
+.contact-form button {
+  min-height: 46px;
+  border: 0;
+  border-radius: 6px;
+  padding: 0 16px;
+  color: #fff;
+  background: var(--accent);
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.contact-form button:hover {
+  background: var(--accent-dark);
+}
+
+.contact-status {
+  min-height: 22px;
+  margin: 4px 0 0;
+  font-size: 14px;
+}
+
+.contact-status.error {
+  color: #9f4320;
+}
+
+.contact-status.success {
+  color: var(--accent-dark);
+}
+
+.contact-honeypot {
+  position: absolute;
+  left: -10000px;
+}
+
+.legal-footer {
+  padding: 26px 16px;
+  border-top: 1px solid var(--line);
+  color: var(--muted);
+  background: #fff;
+  font-size: 13px;
+  text-align: center;
+}
+
+@media (max-width: 700px) {
+  .legal-nav {
+    align-items: flex-start;
+    flex-direction: column;
+    padding: 16px 0;
+  }
+
+  .legal-links {
+    justify-content: flex-start;
+  }
+
+  .legal-main {
+    padding-top: 36px;
+  }
+
+  .legal-main h1 {
+    font-size: 34px;
+  }
+
+  .legal-table {
+    display: block;
+    overflow-x: auto;
+  }
+
+  .contact-form {
+    padding: 18px;
+  }
+}

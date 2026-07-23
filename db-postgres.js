@@ -105,6 +105,21 @@ export async function initDatabase() {
 
     CREATE INDEX IF NOT EXISTS reports_reporter_reference_idx
       ON reports (reporter, reference, status);
+
+    CREATE TABLE IF NOT EXISTS contact_messages (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      email TEXT NOT NULL,
+      subject TEXT NOT NULL,
+      message TEXT NOT NULL,
+      status TEXT NOT NULL,
+      handled_by TEXT NOT NULL,
+      created_at BIGINT NOT NULL,
+      handled_at BIGINT
+    );
+
+    CREATE INDEX IF NOT EXISTS contact_messages_status_created_idx
+      ON contact_messages (status, created_at DESC);
   `);
 
   await pool.query("ALTER TABLE accounts ADD COLUMN IF NOT EXISTS active BOOLEAN NOT NULL DEFAULT TRUE");
@@ -411,6 +426,69 @@ export async function updateReportStatus(id, status, handledBy) {
         LIMIT 1000
       )
   `);
+  await pool.query("DELETE FROM reports WHERE status != 'open' AND handled_at < $1", [
+    Date.now() - 730 * 24 * 60 * 60 * 1000,
+  ]);
+}
+
+export async function createContactMessage(contactMessage) {
+  await pool.query(
+    `
+      INSERT INTO contact_messages (
+        id, name, email, subject, message, status, handled_by, created_at, handled_at
+      )
+      VALUES ($1, $2, $3, $4, $5, 'open', '', $6, NULL)
+    `,
+    [
+      contactMessage.id,
+      contactMessage.name,
+      contactMessage.email,
+      contactMessage.subject,
+      contactMessage.message,
+      contactMessage.createdAt,
+    ]
+  );
+}
+
+export async function listContactMessages(limit = 100) {
+  const result = await pool.query(
+    `
+      SELECT id, name, email, subject, message, status,
+        handled_by AS "handledBy", created_at AS "createdAt", handled_at AS "handledAt"
+      FROM contact_messages
+      ORDER BY CASE WHEN status = 'open' THEN 0 ELSE 1 END, created_at DESC
+      LIMIT $1
+    `,
+    [limit]
+  );
+  return result.rows;
+}
+
+export async function getContactMessageById(id) {
+  const result = await pool.query(
+    `
+      SELECT id, name, email, subject, message, status,
+        handled_by AS "handledBy", created_at AS "createdAt", handled_at AS "handledAt"
+      FROM contact_messages
+      WHERE id = $1
+    `,
+    [id]
+  );
+  return result.rows[0];
+}
+
+export async function updateContactMessageStatus(id, status, handledBy) {
+  await pool.query(
+    `
+      UPDATE contact_messages
+      SET status = $1, handled_by = $2, handled_at = $3
+      WHERE id = $4
+    `,
+    [status, handledBy, Date.now(), id]
+  );
+  await pool.query("DELETE FROM contact_messages WHERE status != 'open' AND handled_at < $1", [
+    Date.now() - 365 * 24 * 60 * 60 * 1000,
+  ]);
 }
 
 export async function createAccount(account) {

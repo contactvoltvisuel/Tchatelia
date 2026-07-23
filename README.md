@@ -19,6 +19,9 @@ Prerequis : Node.js 24 ou plus recent.
 - Profils utilisateurs : photo importee ou avatar par lien, description, role et date d'inscription.
 - Messages prives persistants entre comptes, compteur de non-lus et blocage.
 - Signalement des profils et messages publics/prives avec file de moderation.
+- Reglement, conditions d'utilisation et politique de confidentialite.
+- Page de contact avec messages consultables dans le panneau admin.
+- Validation de l'age minimum et des regles avant l'entree dans le chat.
 - Commandes de moderation : `/kick pseudo`, `/ban pseudo`, `/unban pseudo`.
 - Panneau admin : kick, ban, unban, creation et suppression de salons.
 - Historique et bannissements sauvegardes en SQLite local ou PostgreSQL/Supabase.
@@ -35,6 +38,10 @@ Prerequis : Node.js 24 ou plus recent.
 - `public/index.html` : page du chat.
 - `public/app.js` : logique cote navigateur.
 - `public/styles.css` : interface visuelle.
+- `public/reglement.html` : reglement communautaire.
+- `public/conditions.html` : conditions d'utilisation.
+- `public/confidentialite.html` : politique de confidentialite.
+- `public/contact.html` : formulaire de contact.
 
 Cette architecture reste volontairement simple, mais les donnees importantes
 survivent maintenant aux redemarrages.
@@ -107,10 +114,15 @@ Pour une premiere mise en ligne gratuite :
 Important : utiliser `npm install`, pas `npm ci`, car Render doit installer la
 dependance PostgreSQL `pg` a partir de `package.json`.
 
-## Prochaine etape
+## Informations legales a completer
 
-La prochaine version pourrait ajouter :
+Avant d'ouvrir le site au public, remplacer dans `public/conditions.html` et
+`public/confidentialite.html` :
 
-- un journal des actions de moderation,
-- des profils utilisateurs,
-- des permissions plus fines par salon.
+```text
+{{NOM_COMPLET_OU_RAISON_SOCIALE}}
+{{ADRESSE_POSTALE}}
+```
+
+Ces pages sont une base pratique a adapter a la situation reelle du responsable
+du site.

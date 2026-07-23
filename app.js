@@ -26,6 +26,9 @@ const adminRefreshLogsButton = document.querySelector("#adminRefreshLogsButton")
 const adminModerationLogList = document.querySelector("#adminModerationLogList");
 const adminRefreshReportsButton = document.querySelector("#adminRefreshReportsButton");
 const adminReportList = document.querySelector("#adminReportList");
+const adminContactPanel = document.querySelector(".admin-contact-panel");
+const adminRefreshContactsButton = document.querySelector("#adminRefreshContactsButton");
+const adminContactList = document.querySelector("#adminContactList");
 const roomName = document.querySelector("#roomName");
 const roomTopic = document.querySelector("#roomTopic");
 const privateMessagesButton = document.querySelector("#privateMessagesButton");
@@ -77,6 +80,7 @@ let currentUsers = [];
 let currentAccounts = [];
 let currentModerationLogs = [];
 let currentReports = [];
+let currentContactMessages = [];
 let selectedAvatar = null;
 let currentProfileAccountNickname = "";
 let currentProfileNickname = "";
@@ -99,6 +103,7 @@ loginForm.addEventListener("submit", (event) => {
       adminPassword: data.get("adminPassword"),
       accountPassword: data.get("accountPassword"),
       authMode: data.get("authMode"),
+      legalAccepted: data.get("legalAccepted") === "on",
     },
     (response) => {
       if (!response.ok) {
@@ -333,6 +338,12 @@ adminRefreshReportsButton.addEventListener("click", () => {
   });
 });
 
+adminRefreshContactsButton.addEventListener("click", () => {
+  socket.emit("contact-action", {
+    action: "list",
+  });
+});
+
 socket.on("history", (history) => {
   messages.innerHTML = "";
   history.forEach(renderMessage);
@@ -410,6 +421,11 @@ socket.on("moderation-logs", (logs) => {
 socket.on("reports", (reports) => {
   currentReports = reports;
   renderReports();
+});
+
+socket.on("contact-messages", (contactMessages) => {
+  currentContactMessages = contactMessages;
+  renderContactMessages();
 });
 
 socket.on("report-created", () => {
@@ -494,6 +510,7 @@ function renderAdminPanel() {
     adminAccountList.innerHTML = "";
     adminModerationLogList.innerHTML = "";
     adminReportList.innerHTML = "";
+    adminContactList.innerHTML = "";
     return;
   }
 
@@ -504,6 +521,7 @@ function renderAdminPanel() {
   adminDeleteRoomButton.classList.toggle("hidden", !canManage);
   adminAccountPanel.classList.toggle("hidden", !canManage);
   adminModerationLogPanel.classList.toggle("hidden", !canManage);
+  adminContactPanel.classList.toggle("hidden", !canManage);
   adminDeleteRoomButton.disabled = currentRoom === "accueil";
   socket.emit("report-action", {
     action: "list",
@@ -516,9 +534,13 @@ function renderAdminPanel() {
     socket.emit("moderation-log-action", {
       action: "list",
     });
+    socket.emit("contact-action", {
+      action: "list",
+    });
   } else {
     adminAccountList.innerHTML = "";
     adminModerationLogList.innerHTML = "";
+    adminContactList.innerHTML = "";
   }
 
   currentUsers.forEach((user) => {
@@ -544,6 +566,7 @@ function renderAdminPanel() {
   renderAccountPanel();
   renderModerationLog();
   renderReports();
+  renderContactMessages();
 }
 
 function renderAccountPanel() {
@@ -750,6 +773,72 @@ function formatReportReason(reason) {
   return labels[reason] || reason;
 }
 
+function renderContactMessages() {
+  if (currentRole !== "admin") return;
+
+  adminContactList.innerHTML = "";
+  if (!currentContactMessages.length) {
+    const empty = document.createElement("p");
+    empty.className = "admin-empty";
+    empty.textContent = "Aucune demande de contact.";
+    adminContactList.append(empty);
+    return;
+  }
+
+  currentContactMessages.forEach((contactMessage) => {
+    const row = document.createElement("article");
+    row.className = `admin-contact ${contactMessage.status}`;
+
+    const title = document.createElement("strong");
+    title.textContent = `${formatContactSubject(contactMessage.subject)} - ${contactMessage.name}`;
+
+    const email = document.createElement("a");
+    email.href = `mailto:${contactMessage.email}`;
+    email.textContent = contactMessage.email;
+
+    const message = document.createElement("p");
+    message.textContent = contactMessage.message;
+
+    const meta = document.createElement("small");
+    meta.textContent = new Intl.DateTimeFormat("fr-FR", {
+      dateStyle: "short",
+      timeStyle: "short",
+    }).format(Number(contactMessage.createdAt));
+
+    row.append(title, email, message, meta);
+
+    if (contactMessage.status === "open") {
+      const resolveButton = document.createElement("button");
+      resolveButton.type = "button";
+      resolveButton.textContent = "Marquer traite";
+      resolveButton.addEventListener("click", () => {
+        socket.emit("contact-action", {
+          action: "resolve",
+          id: contactMessage.id,
+        });
+      });
+      row.append(resolveButton);
+    } else {
+      const status = document.createElement("small");
+      status.textContent = `Traite par ${contactMessage.handledBy}`;
+      row.append(status);
+    }
+
+    adminContactList.append(row);
+  });
+}
+
+function formatContactSubject(subject) {
+  const labels = {
+    general: "Question",
+    account: "Compte",
+    moderation: "Moderation",
+    privacy: "Donnees personnelles",
+    other: "Autre",
+  };
+  return labels[subject] || subject;
+}
+
 function formatLogAction(action) {
   const labels = {
     kick: "Exclusion",
@@ -764,6 +853,7 @@ function formatLogAction(action) {
     room_deleted: "Salon supprime",
     report_resolved: "Signalement traite",
     report_dismissed: "Signalement rejete",
+    contact_resolved: "Contact traite",
   };
   return labels[action] || action;
 }

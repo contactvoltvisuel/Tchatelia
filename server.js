@@ -9,11 +9,13 @@ import { fileURLToPath } from "node:url";
 import { Server } from "socket.io";
 import {
   banNickname,
+  createContactMessage,
   createAccount,
   createReport,
   createRoom,
   deleteRoom,
   getAccountByNickname,
+  getContactMessageById,
   getDatabaseLabel,
   getMessageById,
   getPrivateBlockState,
@@ -26,6 +28,7 @@ import {
   isBanned,
   hasOpenReport,
   listAccounts,
+  listContactMessages,
   listModerationLogs,
   listPrivateBlocks,
   listPrivateMessagesForAccount,
@@ -41,6 +44,7 @@ import {
   updateAccountPassword,
   updateAccountProfile,
   updateAccountRole,
+  updateContactMessageStatus,
   updateRoomTopic,
   updateReportStatus,
 } from "./db.js";
@@ -63,6 +67,7 @@ const SPAM_MAX_MESSAGES = 5;
 const SPAM_COOLDOWN_MS = 15_000;
 const DUPLICATE_COOLDOWN_MS = 8_000;
 const MODERATION_ROLES = new Set(["admin", "moderator"]);
+const contactRateLimits = new Map();
 
 await initDatabase();
 
@@ -80,6 +85,8 @@ const rooms = new Map(
 
 const users = new Map();
 
+app.set("trust proxy", 1);
+app.use(express.json({ limit: "20kb" }));
 app.use(express.static(publicDir));
 app.use(express.static(__dirname));
 
@@ -111,8 +118,76 @@ app.get("/avatar/:nickname", async (request, response) => {
   response.redirect(302, avatarUrl);
 });
 
+app.post("/api/contact", async (request, response) => {
+  const now = Date.now();
+  const body = request.body || {};
+  const clientKey = request.ip || "unknown";
+  const previousContact = contactRateLimits.get(clientKey) || 0;
+
+  if (now - previousContact < 60_000) {
+    response.status(429).json({
+      ok: false,
+      error: "Attends une minute avant d'envoyer un nouveau message.",
+    });
+    return;
+  }
+
+  if (String(body.website || "").trim()) {
+    response.status(201).json({ ok: true });
+    return;
+  }
+
+  const name = String(body.name || "").trim().slice(0, 80);
+  const email = String(body.email || "").trim().toLocaleLowerCase("fr-FR").slice(0, 150);
+  const subject = ["general", "account", "moderation", "privacy", "other"].includes(
+    body.subject
+  )
+    ? body.subject
+    : "other";
+  const message = String(body.message || "").trim().slice(0, 2000);
+  const validEmail = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+
+  if (name.length < 2 || !validEmail || message.length < 20 || body.accepted !== true) {
+    response.status(400).json({
+      ok: false,
+      error: "Verifie ton nom, ton e-mail, ton message et l'acceptation de la politique.",
+    });
+    return;
+  }
+
+  try {
+    await createContactMessage({
+      id: crypto.randomUUID(),
+      name,
+      email,
+      subject,
+      message,
+      createdAt: now,
+    });
+    contactRateLimits.set(clientKey, now);
+
+    if (contactRateLimits.size > 1000) {
+      for (const [key, sentAt] of contactRateLimits.entries()) {
+        if (now - sentAt > 60_000) contactRateLimits.delete(key);
+      }
+    }
+
+    await publishContactMessages();
+    response.status(201).json({ ok: true });
+  } catch (error) {
+    console.error("Erreur formulaire de contact:", error);
+    response.status(500).json({
+      ok: false,
+      error: "Le message n'a pas pu etre envoye. Reessaie plus tard.",
+    });
+  }
+});
+
 io.on("connection", (socket) => {
-  socket.on("join", async ({ nickname, room, adminPassword, accountPassword, authMode }, callback) => {
+  socket.on("join", async (
+    { nickname, room, adminPassword, accountPassword, authMode, legalAccepted },
+    callback
+  ) => {
     const cleanNickname = cleanName(nickname);
     const normalizedNickname = normalizeName(cleanNickname);
     const cleanRoom = rooms.has(room) ? room : "accueil";
@@ -120,6 +195,14 @@ io.on("connection", (socket) => {
     const isAdmin = String(adminPassword || "") === ADMIN_PASSWORD;
     const cleanAuthMode = ["guest", "login", "register"].includes(authMode) ? authMode : "guest";
     const cleanAccountPassword = String(accountPassword || "");
+
+    if (legalAccepted !== true) {
+      callback?.({
+        ok: false,
+        error: "Tu dois confirmer ton age et accepter les textes du site.",
+      });
+      return;
+    }
 
     if (wantsAdmin && !isAdmin) {
       callback?.({
@@ -228,6 +311,7 @@ io.on("connection", (socket) => {
     if (role === "admin") {
       await sendAccountList(socket);
       await sendModerationLogs(socket);
+      await sendContactMessages(socket);
     }
     if (MODERATION_ROLES.has(role)) {
       await sendReports(socket);
@@ -475,6 +559,16 @@ io.on("connection", (socket) => {
     }
 
     await handleReportModeration(socket, user, payload);
+  });
+
+  socket.on("contact-action", async (payload = {}) => {
+    const user = users.get(socket.id);
+    if (!user || user.role !== "admin") {
+      emitPrivateSystem(socket, "Gestion des contacts reservee aux admins.");
+      return;
+    }
+
+    await handleContactAction(socket, user, payload);
   });
 
   socket.on("disconnect", async () => {
@@ -964,6 +1058,43 @@ async function publishReports() {
   for (const [socketId, connectedUser] of users.entries()) {
     if (MODERATION_ROLES.has(connectedUser.role)) {
       io.to(socketId).emit("reports", reports);
+    }
+  }
+}
+
+async function handleContactAction(socket, admin, payload) {
+  if (payload.action === "list") {
+    await sendContactMessages(socket);
+    return;
+  }
+
+  if (payload.action !== "resolve") return;
+  const contactMessage = await getContactMessageById(String(payload.id || ""));
+  if (!contactMessage || contactMessage.status !== "open") {
+    emitPrivateSystem(socket, "Ce message de contact a deja ete traite ou n'existe plus.");
+    return;
+  }
+
+  await updateContactMessageStatus(contactMessage.id, "resolved", admin.nickname);
+  await recordModerationAction(
+    admin,
+    "contact_resolved",
+    contactMessage.name,
+    `Demande ${contactMessage.subject} traitee`
+  );
+  emitPrivateSystem(socket, "Message de contact marque comme traite.");
+  await publishContactMessages();
+}
+
+async function sendContactMessages(socket) {
+  socket.emit("contact-messages", await listContactMessages(100));
+}
+
+async function publishContactMessages() {
+  const contactMessages = await listContactMessages(100);
+  for (const [socketId, connectedUser] of users.entries()) {
+    if (connectedUser.role === "admin") {
+      io.to(socketId).emit("contact-messages", contactMessages);
     }
   }
 }

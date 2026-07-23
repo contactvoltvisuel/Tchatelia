@@ -70,7 +70,23 @@
             placeholder="Optionnel"
           />
 
+          <label class="access-consent">
+            <input name="legalAccepted" type="checkbox" required />
+            <span>
+              J'ai au moins 15 ans et j'accepte le
+              <a href="/reglement.html" target="_blank">reglement</a>, les
+              <a href="/conditions.html" target="_blank">conditions d'utilisation</a> et la
+              <a href="/confidentialite.html" target="_blank">politique de confidentialite</a>.
+            </span>
+          </label>
+
           <button type="submit">Entrer dans le chat</button>
+          <nav class="login-legal-links" aria-label="Informations legales">
+            <a href="/reglement.html">Reglement</a>
+            <a href="/conditions.html">Conditions</a>
+            <a href="/confidentialite.html">Confidentialite</a>
+            <a href="/contact.html">Contact</a>
+          </nav>
         </form>
       </section>
 
@@ -148,7 +164,19 @@
               </div>
               <div class="admin-moderation-log-list" id="adminModerationLogList"></div>
             </div>
+            <div class="admin-contact-panel">
+              <div class="admin-section-title">
+                <h2>Contact</h2>
+                <button id="adminRefreshContactsButton" type="button">Actualiser</button>
+              </div>
+              <div class="admin-contact-list" id="adminContactList"></div>
+            </div>
           </div>
+          <nav class="sidebar-legal-links" aria-label="Informations legales">
+            <a href="/reglement.html">Reglement</a>
+            <a href="/confidentialite.html">Confidentialite</a>
+            <a href="/contact.html">Contact</a>
+          </nav>
         </aside>
 
         <div class="conversation">
