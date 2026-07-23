@@ -13,6 +13,7 @@ Prerequis : Node.js 24 ou plus recent.
 - Connexion admin avec mot de passe.
 - Commandes de moderation : `/kick pseudo`, `/ban pseudo`, `/unban pseudo`.
 - Historique et bannissements sauvegardes en SQLite local ou PostgreSQL/Supabase.
+- Anti-spam simple : limite les rafales et les messages identiques repetes.
 - Commandes simples : `/me texte`, `/clear` et `/help`.
 
 ## Architecture simple

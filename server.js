@@ -28,6 +28,10 @@ const rootIndex = join(__dirname, "index.html");
 const PORT = process.env.PORT || 3000;
 const MAX_HISTORY = 80;
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || "tchatelia-admin";
+const SPAM_WINDOW_MS = 10_000;
+const SPAM_MAX_MESSAGES = 5;
+const SPAM_COOLDOWN_MS = 15_000;
+const DUPLICATE_COOLDOWN_MS = 8_000;
 
 await initDatabase();
 
@@ -79,6 +83,9 @@ io.on("connection", (socket) => {
       nickname: cleanNickname,
       room: cleanRoom,
       role: isAdmin ? "admin" : "user",
+      messageTimes: [],
+      lastMessage: "",
+      cooldownUntil: 0,
       joinedAt: Date.now(),
     });
 
@@ -186,6 +193,18 @@ io.on("connection", (socket) => {
       return;
     }
 
+    const spamCheck = checkSpam(user, messageText);
+    if (!spamCheck.ok) {
+      socket.emit("message", {
+        id: crypto.randomUUID(),
+        type: "system",
+        nickname: "Systeme",
+        text: spamCheck.message,
+        createdAt: Date.now(),
+      });
+      return;
+    }
+
     if (messageText.startsWith("/me ")) {
       await addMessage(user.room, {
         id: crypto.randomUUID(),
@@ -242,6 +261,47 @@ function normalizeName(value) {
 function findUserByNickname(nickname) {
   const normalized = normalizeName(nickname);
   return [...users.entries()].find(([, user]) => normalizeName(user.nickname) === normalized);
+}
+
+function checkSpam(user, messageText) {
+  if (user.role === "admin") {
+    return { ok: true };
+  }
+
+  const now = Date.now();
+
+  if (user.cooldownUntil > now) {
+    const seconds = Math.ceil((user.cooldownUntil - now) / 1000);
+    return {
+      ok: false,
+      message: `Anti-spam : attends encore ${seconds}s avant de reparler.`,
+    };
+  }
+
+  const normalizedMessage = messageText.toLocaleLowerCase("fr-FR");
+  if (normalizedMessage === user.lastMessage) {
+    user.cooldownUntil = now + DUPLICATE_COOLDOWN_MS;
+    return {
+      ok: false,
+      message: "Anti-spam : evite d'envoyer deux fois le meme message.",
+    };
+  }
+
+  user.messageTimes = user.messageTimes.filter((sentAt) => now - sentAt < SPAM_WINDOW_MS);
+
+  if (user.messageTimes.length >= SPAM_MAX_MESSAGES) {
+    user.cooldownUntil = now + SPAM_COOLDOWN_MS;
+    user.messageTimes = [];
+    return {
+      ok: false,
+      message: "Anti-spam : trop de messages d'un coup, pause de 15s.",
+    };
+  }
+
+  user.messageTimes.push(now);
+  user.lastMessage = normalizedMessage;
+
+  return { ok: true };
 }
 
 async function handleModeration(socket, admin, action, rawTarget) {
