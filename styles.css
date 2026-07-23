@@ -1259,6 +1259,13 @@ body.chat-active {
   overflow: hidden;
 }
 
+body.chat-active .shell {
+  width: 100%;
+  height: 100vh;
+  height: 100dvh;
+  padding: 0;
+}
+
 button,
 input,
 select,
@@ -1424,10 +1431,13 @@ button {
 
 .chat-panel {
   position: relative;
-  width: min(1440px, 100%);
-  height: min(900px, calc(100vh - 32px));
+  width: 100%;
+  height: 100vh;
+  height: 100dvh;
   grid-template-columns: 248px minmax(0, 1fr) 248px;
-  border-radius: 8px;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
 }
 
 .sidebar,
