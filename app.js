@@ -70,6 +70,21 @@ const reportContext = document.querySelector("#reportContext");
 const reportForm = document.querySelector("#reportForm");
 const reportReason = document.querySelector("#reportReason");
 const reportDetails = document.querySelector("#reportDetails");
+const roomSidebar = document.querySelector("#roomSidebar");
+const memberSidebar = document.querySelector("#memberSidebar");
+const roomSidebarButton = document.querySelector("#roomSidebarButton");
+const roomSidebarCloseButton = document.querySelector("#roomSidebarCloseButton");
+const membersPanelButton = document.querySelector("#membersPanelButton");
+const membersPanelCloseButton = document.querySelector("#membersPanelCloseButton");
+const mobileOverlay = document.querySelector("#mobileOverlay");
+const memberCount = document.querySelector("#memberCount");
+const currentUserName = document.querySelector("#currentUserName");
+const currentUserRole = document.querySelector("#currentUserRole");
+const currentUserInitials = document.querySelector("#currentUserInitials");
+const sidebarProfileButton = document.querySelector("#sidebarProfileButton");
+const adminPanelButton = document.querySelector("#adminPanelButton");
+const adminDialog = document.querySelector("#adminDialog");
+const adminCloseButton = document.querySelector("#adminCloseButton");
 
 let currentRoom = "accueil";
 let currentNickname = "";
@@ -139,6 +154,36 @@ myProfileButton.addEventListener("click", () => {
 
 privateMessagesButton.addEventListener("click", () => {
   openPrivateMessages();
+});
+
+sidebarProfileButton.addEventListener("click", () => {
+  requestProfile(currentNickname);
+});
+
+roomSidebarButton.addEventListener("click", () => {
+  openMobilePanel(roomSidebar);
+});
+
+roomSidebarCloseButton.addEventListener("click", closeMobilePanels);
+
+membersPanelButton.addEventListener("click", () => {
+  openMobilePanel(memberSidebar);
+});
+
+membersPanelCloseButton.addEventListener("click", closeMobilePanels);
+mobileOverlay.addEventListener("click", closeMobilePanels);
+
+adminPanelButton.addEventListener("click", () => {
+  closeMobilePanels();
+  if (!adminDialog.open) adminDialog.showModal();
+});
+
+adminCloseButton.addEventListener("click", () => {
+  adminDialog.close();
+});
+
+adminDialog.addEventListener("click", (event) => {
+  if (event.target === adminDialog) adminDialog.close();
 });
 
 profileCloseButton.addEventListener("click", () => {
@@ -360,6 +405,8 @@ socket.on("users", (users) => {
   const me = users.find((user) => user.nickname === currentNickname);
   if (me) currentRole = me.role;
 
+  memberCount.textContent = String(users.length);
+  updateCurrentUserSummary();
   userList.innerHTML = "";
   users.forEach((user) => {
     const item = document.createElement("li");
@@ -371,9 +418,22 @@ socket.on("users", (users) => {
     button.title = `Voir le profil de ${user.nickname}`;
     button.append(createAvatar(user, "small"));
 
-    const name = document.createElement("span");
-    name.textContent = formatUserName(user);
-    button.append(name);
+    const copy = document.createElement("span");
+    copy.className = "profile-user-copy";
+
+    const name = document.createElement("strong");
+    name.textContent = user.nickname;
+
+    const role = document.createElement("small");
+    role.textContent =
+      user.role === "admin" || user.role === "moderator"
+        ? formatRole(user.role)
+        : user.account
+          ? "membre"
+          : "invite";
+
+    copy.append(name, role);
+    button.append(copy);
     button.addEventListener("click", () => requestProfile(user.nickname));
 
     item.append(button);
@@ -396,7 +456,10 @@ socket.on("rooms", (rooms) => {
     button.className = room.name === currentRoom ? "room active" : "room";
     button.innerHTML = `<span>#${escapeHtml(room.name)}</span><small>${room.users}</small>`;
     button.title = room.topic;
-    button.addEventListener("click", () => switchRoom(room.name));
+    button.addEventListener("click", () => {
+      switchRoom(room.name);
+      closeMobilePanels();
+    });
     roomList.append(button);
   });
 });
@@ -489,15 +552,41 @@ function switchRoom(room) {
   });
 }
 
+function openMobilePanel(panel) {
+  closeMobilePanels();
+  panel.classList.add("is-open");
+  chatPanel.classList.add("is-mobile-panel-open");
+}
+
+function closeMobilePanels() {
+  roomSidebar.classList.remove("is-open");
+  memberSidebar.classList.remove("is-open");
+  chatPanel.classList.remove("is-mobile-panel-open");
+}
+
 function showChat(response) {
+  document.body.classList.add("chat-active");
   loginPanel.classList.add("hidden");
   chatPanel.classList.remove("hidden");
   roomName.textContent = `#${response.room}`;
   roomTopic.textContent = response.topic;
   myProfileButton.classList.toggle("hidden", !currentAccount);
   privateMessagesButton.classList.toggle("hidden", !currentAccount);
+  sidebarProfileButton.classList.toggle("hidden", !currentAccount);
+  updateCurrentUserSummary();
   renderAdminPanel();
   messageInput.focus();
+}
+
+function updateCurrentUserSummary() {
+  currentUserName.textContent = currentNickname || "Invite";
+  currentUserRole.textContent =
+    currentRole === "admin" || currentRole === "moderator"
+      ? formatRole(currentRole)
+      : currentAccount
+        ? "membre"
+        : "invite";
+  currentUserInitials.textContent = getInitials(currentNickname);
 }
 
 function renderAdminPanel() {
@@ -506,6 +595,8 @@ function renderAdminPanel() {
 
   if (!canModerate) {
     adminPanel.classList.add("hidden");
+    adminPanelButton.classList.add("hidden");
+    if (adminDialog.open) adminDialog.close();
     adminUserList.innerHTML = "";
     adminAccountList.innerHTML = "";
     adminModerationLogList.innerHTML = "";
@@ -515,6 +606,7 @@ function renderAdminPanel() {
   }
 
   adminPanel.classList.remove("hidden");
+  adminPanelButton.classList.remove("hidden");
   adminUserList.innerHTML = "";
   adminRoomCreateForm.classList.toggle("hidden", !canManage);
   adminRoomTopicForm.classList.toggle("hidden", !canManage);
@@ -1195,13 +1287,32 @@ function renderMessage(message) {
     minute: "2-digit",
   }).format(message.createdAt);
 
-  row.innerHTML = `
+  const connectedUser = currentUsers.find((user) => user.nickname === message.nickname);
+  row.classList.toggle("from-me", message.nickname === currentNickname);
+  row.append(
+    createAvatar(
+      connectedUser || { nickname: message.nickname, avatarUrl: "" },
+      "message-avatar"
+    )
+  );
+
+  const content = document.createElement("div");
+  content.className = "message-content";
+  content.innerHTML = `
     <div class="message-meta">
       <strong>${escapeHtml(message.nickname)}</strong>
       <time>${time}</time>
     </div>
     <p>${escapeHtml(message.text)}</p>
   `;
+  row.append(content);
+
+  if (connectedUser?.role === "admin" || connectedUser?.role === "moderator") {
+    const role = document.createElement("span");
+    role.className = "message-role";
+    role.textContent = connectedUser.role === "admin" ? "admin" : "modo";
+    content.querySelector(".message-meta").append(role);
+  }
 
   if (currentAccount && message.nickname !== currentNickname) {
     const reportButton = document.createElement("button");
@@ -1215,7 +1326,7 @@ function renderMessage(message) {
         messageId: message.id,
       });
     });
-    row.querySelector(".message-meta").append(reportButton);
+    content.querySelector(".message-meta").append(reportButton);
   }
 
   messages.append(row);

@@ -4,21 +4,33 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Tchatelia</title>
+    <link rel="icon" href="data:," />
     <link rel="stylesheet" href="/styles.css" />
   </head>
   <body>
     <main class="shell">
       <section class="login-panel" id="loginPanel">
-        <div>
-          <p class="eyebrow">Salons publics gratuits</p>
-          <h1>Tchatelia</h1>
-          <p class="intro">
-            Une premiere version type EuropNet : pseudo libre, salons publics,
-            messages instantanes et connectes visibles.
-          </p>
+        <div class="login-brand-pane">
+          <div class="brand-lockup">
+            <span class="brand-mark" aria-hidden="true">T</span>
+            <span>Tchatelia</span>
+          </div>
+          <div>
+            <p class="eyebrow">Discussion francophone</p>
+            <h1>Retrouvons-nous.</h1>
+            <p class="intro">Des salons simples pour discuter, partager et faire connaissance.</p>
+          </div>
+          <div class="login-presence" aria-label="Service disponible">
+            <span class="status-dot"></span>
+            <span>Le tchat est ouvert</span>
+          </div>
         </div>
 
         <form class="login-form" id="loginForm">
+          <div class="login-form-heading">
+            <p class="eyebrow">Bienvenue</p>
+            <h2>Entrer dans Tchatelia</h2>
+          </div>
           <div class="auth-mode">
             <label>
               <input type="radio" name="authMode" value="guest" checked />
@@ -91,89 +103,58 @@
       </section>
 
       <section class="chat-panel hidden" id="chatPanel" aria-label="Chat">
-        <aside class="sidebar">
-          <div class="brand">
-            <span class="status-dot"></span>
-            <strong>Tchatelia</strong>
+        <div class="mobile-overlay" id="mobileOverlay"></div>
+
+        <aside class="sidebar" id="roomSidebar">
+          <div class="sidebar-header">
+            <div class="brand">
+              <span class="brand-mark small" aria-hidden="true">T</span>
+              <div>
+                <strong>Tchatelia</strong>
+                <small>En direct</small>
+              </div>
+            </div>
+            <button
+              class="icon-button mobile-close-button"
+              id="roomSidebarCloseButton"
+              type="button"
+              aria-label="Fermer les salons"
+              title="Fermer"
+            >
+              &times;
+            </button>
           </div>
-          <div>
-            <h2>Salons</h2>
+
+          <div class="sidebar-section">
+            <div class="section-heading">
+              <h2>Salons</h2>
+              <span class="section-status" aria-hidden="true"></span>
+            </div>
             <div class="room-list" id="roomList"></div>
           </div>
-          <div>
-            <h2>Connectes</h2>
-            <ul class="user-list" id="userList"></ul>
-          </div>
-          <div class="admin-panel hidden" id="adminPanel">
-            <h2>Admin</h2>
-            <div class="admin-user-list" id="adminUserList"></div>
-            <form class="admin-unban-form" id="adminUnbanForm">
-              <input
-                id="adminUnbanInput"
-                maxlength="18"
-                autocomplete="off"
-                placeholder="Pseudo a debannir"
-              />
-              <button type="submit">Unban</button>
-            </form>
-            <div class="admin-report-panel">
-              <div class="admin-section-title">
-                <h2>Signalements</h2>
-                <button id="adminRefreshReportsButton" type="button">Actualiser</button>
+
+          <div class="sidebar-account">
+            <div class="sidebar-account-copy">
+              <span class="account-avatar" id="currentUserInitials">?</span>
+              <div>
+                <strong id="currentUserName">Invite</strong>
+                <small id="currentUserRole">Hors ligne</small>
               </div>
-              <div class="admin-report-list" id="adminReportList"></div>
             </div>
-            <form class="admin-room-form" id="adminRoomCreateForm">
-              <input
-                id="adminRoomNameInput"
-                maxlength="24"
-                autocomplete="off"
-                placeholder="Nouveau salon"
-              />
-              <input
-                id="adminRoomTopicInput"
-                maxlength="90"
-                autocomplete="off"
-                placeholder="Sujet du salon"
-              />
-              <button type="submit">Creer salon</button>
-            </form>
-            <form class="admin-room-form" id="adminRoomTopicForm">
-              <input
-                id="adminCurrentTopicInput"
-                maxlength="90"
-                autocomplete="off"
-                placeholder="Nouveau sujet du salon actuel"
-              />
-              <button type="submit">Modifier sujet</button>
-            </form>
-            <button class="danger-button" id="adminDeleteRoomButton" type="button">
-              Supprimer ce salon
+            <button
+              class="icon-button hidden"
+              id="sidebarProfileButton"
+              type="button"
+              aria-label="Ouvrir mon profil"
+              title="Mon profil"
+            >
+              &#9786;
             </button>
-            <div class="admin-account-panel">
-              <div class="admin-section-title">
-                <h2>Comptes</h2>
-                <button id="adminRefreshAccountsButton" type="button">Actualiser</button>
-              </div>
-              <div class="admin-account-list" id="adminAccountList"></div>
-            </div>
-            <div class="admin-moderation-log-panel">
-              <div class="admin-section-title">
-                <h2>Journal</h2>
-                <button id="adminRefreshLogsButton" type="button">Actualiser</button>
-              </div>
-              <div class="admin-moderation-log-list" id="adminModerationLogList"></div>
-            </div>
-            <div class="admin-contact-panel">
-              <div class="admin-section-title">
-                <h2>Contact</h2>
-                <button id="adminRefreshContactsButton" type="button">Actualiser</button>
-              </div>
-              <div class="admin-contact-list" id="adminContactList"></div>
-            </div>
           </div>
+
           <nav class="sidebar-legal-links" aria-label="Informations legales">
             <a href="/reglement.html">Reglement</a>
+            <a href="/conditions.html">Conditions</a>
             <a href="/confidentialite.html">Confidentialite</a>
             <a href="/contact.html">Contact</a>
           </nav>
@@ -181,34 +162,185 @@
 
         <div class="conversation">
           <header class="chat-header">
-            <div>
+            <button
+              class="icon-button mobile-panel-button"
+              id="roomSidebarButton"
+              type="button"
+              aria-label="Afficher les salons"
+              title="Salons"
+            >
+              &#9776;
+            </button>
+            <div class="room-heading">
               <p class="eyebrow" id="roomName">#accueil</p>
               <h1 id="roomTopic">Salon general pour discuter librement.</h1>
             </div>
             <div class="chat-header-actions">
               <button class="ghost-button hidden" id="privateMessagesButton" type="button">
-                Messages
+                <span aria-hidden="true">&#9993;</span>
+                <span class="button-label">Messages</span>
                 <span class="private-unread-badge hidden" id="privateUnreadBadge">0</span>
               </button>
-              <button class="ghost-button hidden" id="myProfileButton" type="button">Mon profil</button>
-              <button class="ghost-button" id="leaveButton" type="button">Sortir</button>
+              <button class="ghost-button hidden" id="myProfileButton" type="button">
+                <span aria-hidden="true">&#9786;</span>
+                <span class="button-label">Profil</span>
+              </button>
+              <button
+                class="icon-button mobile-panel-button"
+                id="membersPanelButton"
+                type="button"
+                aria-label="Afficher les membres"
+                title="Membres"
+              >
+                &#9679;
+              </button>
+              <button class="leave-button" id="leaveButton" type="button">Sortir</button>
             </div>
           </header>
 
-          <div class="messages" id="messages" aria-live="polite"></div>
+          <div class="messages" id="messages" aria-live="polite">
+            <div class="messages-empty">
+              <span aria-hidden="true">#</span>
+              <p>Les messages du salon apparaitront ici.</p>
+            </div>
+          </div>
 
           <form class="message-form" id="messageForm">
-            <input
-              id="messageInput"
-              maxlength="500"
-              autocomplete="off"
-              placeholder="Ecris un message... /help affiche les commandes"
-            />
-            <button type="submit">Envoyer</button>
+            <div class="composer">
+              <input
+                id="messageInput"
+                maxlength="500"
+                autocomplete="off"
+                placeholder="Ecris un message..."
+                aria-label="Message"
+              />
+              <span class="composer-hint">/help</span>
+            </div>
+            <button class="send-button" type="submit" aria-label="Envoyer le message">
+              Envoyer
+            </button>
           </form>
         </div>
+
+        <aside class="member-sidebar" id="memberSidebar">
+          <div class="member-sidebar-header">
+            <div>
+              <p class="eyebrow">Dans ce salon</p>
+              <h2>Connectes <span id="memberCount">0</span></h2>
+            </div>
+            <button
+              class="icon-button mobile-close-button"
+              id="membersPanelCloseButton"
+              type="button"
+              aria-label="Fermer les membres"
+              title="Fermer"
+            >
+              &times;
+            </button>
+          </div>
+          <ul class="user-list" id="userList"></ul>
+          <button class="moderation-button hidden" id="adminPanelButton" type="button">
+            Ouvrir la moderation
+          </button>
+        </aside>
       </section>
     </main>
+
+    <dialog class="admin-dialog" id="adminDialog">
+      <header class="admin-dialog-header">
+        <div>
+          <p class="eyebrow">Tchatelia</p>
+          <h2>Centre de moderation</h2>
+        </div>
+        <button
+          class="icon-button"
+          id="adminCloseButton"
+          type="button"
+          aria-label="Fermer la moderation"
+          title="Fermer"
+        >
+          &times;
+        </button>
+      </header>
+      <div class="admin-panel hidden" id="adminPanel">
+        <section class="admin-block">
+          <h2>Utilisateurs connectes</h2>
+          <div class="admin-user-list" id="adminUserList"></div>
+          <form class="admin-unban-form" id="adminUnbanForm">
+            <input
+              id="adminUnbanInput"
+              maxlength="18"
+              autocomplete="off"
+              placeholder="Pseudo a debannir"
+            />
+            <button type="submit">Debannir</button>
+          </form>
+        </section>
+
+        <section class="admin-block admin-room-tools">
+          <h2>Gestion des salons</h2>
+          <form class="admin-room-form" id="adminRoomCreateForm">
+            <input
+              id="adminRoomNameInput"
+              maxlength="24"
+              autocomplete="off"
+              placeholder="Nouveau salon"
+            />
+            <input
+              id="adminRoomTopicInput"
+              maxlength="90"
+              autocomplete="off"
+              placeholder="Sujet du salon"
+            />
+            <button type="submit">Creer le salon</button>
+          </form>
+          <form class="admin-room-form" id="adminRoomTopicForm">
+            <input
+              id="adminCurrentTopicInput"
+              maxlength="90"
+              autocomplete="off"
+              placeholder="Nouveau sujet du salon actuel"
+            />
+            <button type="submit">Modifier le sujet</button>
+          </form>
+          <button class="danger-button" id="adminDeleteRoomButton" type="button">
+            Supprimer ce salon
+          </button>
+        </section>
+
+        <section class="admin-block admin-report-panel">
+          <div class="admin-section-title">
+            <h2>Signalements</h2>
+            <button id="adminRefreshReportsButton" type="button">Actualiser</button>
+          </div>
+          <div class="admin-report-list" id="adminReportList"></div>
+        </section>
+
+        <section class="admin-block admin-account-panel">
+          <div class="admin-section-title">
+            <h2>Comptes</h2>
+            <button id="adminRefreshAccountsButton" type="button">Actualiser</button>
+          </div>
+          <div class="admin-account-list" id="adminAccountList"></div>
+        </section>
+
+        <section class="admin-block admin-moderation-log-panel">
+          <div class="admin-section-title">
+            <h2>Journal</h2>
+            <button id="adminRefreshLogsButton" type="button">Actualiser</button>
+          </div>
+          <div class="admin-moderation-log-list" id="adminModerationLogList"></div>
+        </section>
+
+        <section class="admin-block admin-contact-panel">
+          <div class="admin-section-title">
+            <h2>Contact</h2>
+            <button id="adminRefreshContactsButton" type="button">Actualiser</button>
+          </div>
+          <div class="admin-contact-list" id="adminContactList"></div>
+        </section>
+      </div>
+    </dialog>
 
     <dialog class="profile-dialog" id="profileDialog">
       <button class="profile-close-button" id="profileCloseButton" type="button" aria-label="Fermer">

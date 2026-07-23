@@ -11,6 +11,8 @@ Prerequis : Node.js 24 ou plus recent.
 - Connexion invitee toujours disponible pour les pseudos non reserves.
 - Gestion admin des comptes : role, activation et reinitialisation de mot de passe.
 - Salons publics : `#accueil`, `#aide`, `#musique`, `#rencontres`.
+- Interface responsive avec panneaux de salons et de membres adaptes au mobile.
+- Centre de moderation dans une fenetre dediee.
 - Messages instantanes avec Socket.IO.
 - Liste des personnes connectees dans le salon.
 - Connexion admin avec mot de passe.
