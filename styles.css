@@ -314,7 +314,8 @@ button:hover {
   border-top: 1px solid var(--line);
 }
 
-.admin-account-panel {
+.admin-account-panel,
+.admin-moderation-log-panel {
   display: grid;
   gap: 10px;
   padding-top: 10px;
@@ -341,6 +342,32 @@ button:hover {
 .admin-account-list {
   display: grid;
   gap: 8px;
+}
+
+.admin-moderation-log-list {
+  max-height: 360px;
+  display: grid;
+  gap: 8px;
+  overflow-y: auto;
+}
+
+.admin-moderation-log {
+  display: grid;
+  gap: 4px;
+  padding: 9px;
+  border-left: 3px solid var(--accent);
+  background: #fff;
+  font-size: 12px;
+}
+
+.admin-moderation-log strong,
+.admin-moderation-log span {
+  overflow-wrap: anywhere;
+}
+
+.admin-moderation-log small {
+  color: var(--muted);
+  line-height: 1.35;
 }
 
 .admin-account {

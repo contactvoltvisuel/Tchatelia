@@ -52,6 +52,16 @@ export async function initDatabase() {
       active INTEGER NOT NULL DEFAULT 1,
       created_at INTEGER NOT NULL
     );
+
+    CREATE TABLE IF NOT EXISTS moderation_logs (
+      id TEXT PRIMARY KEY,
+      actor TEXT NOT NULL,
+      actor_role TEXT NOT NULL,
+      action TEXT NOT NULL,
+      target TEXT NOT NULL,
+      details TEXT NOT NULL,
+      created_at INTEGER NOT NULL
+    );
   `);
 
   try {
@@ -96,6 +106,33 @@ export async function listAccounts() {
       ORDER BY created_at DESC
     `)
     .all();
+}
+
+export async function listModerationLogs(limit = 100) {
+  return db
+    .prepare(`
+      SELECT id, actor, actor_role AS actorRole, action, target, details, created_at AS createdAt
+      FROM moderation_logs
+      ORDER BY created_at DESC
+      LIMIT ?
+    `)
+    .all(limit);
+}
+
+export async function saveModerationLog(log) {
+  db.prepare(`
+    INSERT INTO moderation_logs (id, actor, actor_role, action, target, details, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
+  `).run(log.id, log.actor, log.actorRole, log.action, log.target, log.details, log.createdAt);
+  db.exec(`
+    DELETE FROM moderation_logs
+    WHERE id NOT IN (
+      SELECT id
+      FROM moderation_logs
+      ORDER BY created_at DESC
+      LIMIT 500
+    )
+  `);
 }
 
 export async function createAccount(account) {

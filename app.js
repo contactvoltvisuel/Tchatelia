@@ -21,6 +21,9 @@ const adminDeleteRoomButton = document.querySelector("#adminDeleteRoomButton");
 const adminRefreshAccountsButton = document.querySelector("#adminRefreshAccountsButton");
 const adminAccountPanel = document.querySelector(".admin-account-panel");
 const adminAccountList = document.querySelector("#adminAccountList");
+const adminModerationLogPanel = document.querySelector(".admin-moderation-log-panel");
+const adminRefreshLogsButton = document.querySelector("#adminRefreshLogsButton");
+const adminModerationLogList = document.querySelector("#adminModerationLogList");
 const roomName = document.querySelector("#roomName");
 const roomTopic = document.querySelector("#roomTopic");
 const leaveButton = document.querySelector("#leaveButton");
@@ -30,6 +33,7 @@ let currentNickname = "";
 let currentRole = "user";
 let currentUsers = [];
 let currentAccounts = [];
+let currentModerationLogs = [];
 
 loginForm.addEventListener("submit", (event) => {
   event.preventDefault();
@@ -130,6 +134,12 @@ adminRefreshAccountsButton.addEventListener("click", () => {
   });
 });
 
+adminRefreshLogsButton.addEventListener("click", () => {
+  socket.emit("moderation-log-action", {
+    action: "list",
+  });
+});
+
 socket.on("history", (history) => {
   messages.innerHTML = "";
   history.forEach(renderMessage);
@@ -187,6 +197,11 @@ socket.on("accounts", (accounts) => {
   renderAccountPanel();
 });
 
+socket.on("moderation-logs", (logs) => {
+  currentModerationLogs = logs;
+  renderModerationLog();
+});
+
 function switchRoom(room) {
   socket.emit("switch-room", room, (response) => {
     currentRoom = response.room;
@@ -212,6 +227,7 @@ function renderAdminPanel() {
     adminPanel.classList.add("hidden");
     adminUserList.innerHTML = "";
     adminAccountList.innerHTML = "";
+    adminModerationLogList.innerHTML = "";
     return;
   }
 
@@ -221,14 +237,19 @@ function renderAdminPanel() {
   adminRoomTopicForm.classList.toggle("hidden", !canManage);
   adminDeleteRoomButton.classList.toggle("hidden", !canManage);
   adminAccountPanel.classList.toggle("hidden", !canManage);
+  adminModerationLogPanel.classList.toggle("hidden", !canManage);
   adminDeleteRoomButton.disabled = currentRoom === "accueil";
 
   if (canManage) {
     socket.emit("account-action", {
       action: "list",
     });
+    socket.emit("moderation-log-action", {
+      action: "list",
+    });
   } else {
     adminAccountList.innerHTML = "";
+    adminModerationLogList.innerHTML = "";
   }
 
   currentUsers.forEach((user) => {
@@ -252,6 +273,7 @@ function renderAdminPanel() {
   });
 
   renderAccountPanel();
+  renderModerationLog();
 }
 
 function renderAccountPanel() {
@@ -326,6 +348,63 @@ function renderAccountPanel() {
     row.append(actions);
     adminAccountList.append(row);
   });
+}
+
+function renderModerationLog() {
+  if (currentRole !== "admin") return;
+
+  adminModerationLogList.innerHTML = "";
+
+  if (!currentModerationLogs.length) {
+    const empty = document.createElement("p");
+    empty.className = "admin-empty";
+    empty.textContent = "Aucune action enregistree.";
+    adminModerationLogList.append(empty);
+    return;
+  }
+
+  currentModerationLogs.forEach((log) => {
+    const row = document.createElement("article");
+    row.className = "admin-moderation-log";
+
+    const title = document.createElement("strong");
+    title.textContent = `${formatLogAction(log.action)} : ${log.target}`;
+
+    const details = document.createElement("span");
+    details.textContent = log.details;
+
+    const meta = document.createElement("small");
+    const date = new Intl.DateTimeFormat("fr-FR", {
+      dateStyle: "short",
+      timeStyle: "short",
+    }).format(Number(log.createdAt));
+    meta.textContent = `${date} - ${log.actor} (${formatRole(log.actorRole)})`;
+
+    row.append(title, details, meta);
+    adminModerationLogList.append(row);
+  });
+}
+
+function formatLogAction(action) {
+  const labels = {
+    kick: "Exclusion",
+    ban: "Bannissement",
+    unban: "Debannissement",
+    account_role: "Role modifie",
+    account_enabled: "Compte reactive",
+    account_disabled: "Compte desactive",
+    password_reset: "Mot de passe",
+    room_created: "Salon cree",
+    room_topic: "Sujet modifie",
+    room_deleted: "Salon supprime",
+  };
+  return labels[action] || action;
+}
+
+function formatRole(role) {
+  if (role === "admin") return "admin";
+  if (role === "moderator") return "moderateur";
+  return "utilisateur";
 }
 
 function createAdminButton(label, action, nickname) {

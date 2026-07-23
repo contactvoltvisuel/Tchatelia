@@ -19,7 +19,9 @@ import {
   initDatabase,
   isBanned,
   listAccounts,
+  listModerationLogs,
   saveMessage,
+  saveModerationLog,
   setAccountActive,
   trimRoomHistory,
   unbanNickname,
@@ -182,6 +184,7 @@ io.on("connection", (socket) => {
     publishUsers(cleanRoom);
     if (role === "admin") {
       await sendAccountList(socket);
+      await sendModerationLogs(socket);
     }
 
     callback?.({
@@ -349,6 +352,16 @@ io.on("connection", (socket) => {
     await handleAccountAction(socket, user, action, nickname, role, password);
   });
 
+  socket.on("moderation-log-action", async ({ action }) => {
+    const user = users.get(socket.id);
+    if (!user || user.role !== "admin") {
+      emitPrivateSystem(socket, "Journal de moderation reserve aux admins.");
+      return;
+    }
+
+    if (action === "list") await sendModerationLogs(socket);
+  });
+
   socket.on("disconnect", async () => {
     const user = users.get(socket.id);
     if (!user) return;
@@ -418,6 +431,7 @@ async function handleAccountAction(socket, admin, action, rawNickname, rawRole, 
     return;
   }
 
+  const logActor = { nickname: admin.nickname, role: admin.role };
   const nickname = normalizeName(rawNickname);
   if (!nickname) {
     emitPrivateSystem(socket, "Indique un compte valide.");
@@ -437,6 +451,12 @@ async function handleAccountAction(socket, admin, action, rawNickname, rawRole, 
     io.emit("rooms", getRoomList());
     for (const room of rooms.keys()) publishUsers(room);
     emitPrivateSystem(socket, `Role de ${account.displayName} mis a jour : ${role}.`);
+    await recordModerationAction(
+      logActor,
+      "account_role",
+      account.displayName,
+      `Role modifie de ${account.role} vers ${role}`
+    );
     await sendAccountList(socket);
     return;
   }
@@ -452,6 +472,12 @@ async function handleAccountAction(socket, admin, action, rawNickname, rawRole, 
     await setAccountActive(nickname, active);
     if (!active) disconnectAccount(nickname, "Ton compte a ete desactive.");
     emitPrivateSystem(socket, `${account.displayName} est maintenant ${active ? "actif" : "desactive"}.`);
+    await recordModerationAction(
+      logActor,
+      active ? "account_enabled" : "account_disabled",
+      account.displayName,
+      active ? "Compte reactive" : "Compte desactive"
+    );
     await sendAccountList(socket);
     return;
   }
@@ -465,6 +491,12 @@ async function handleAccountAction(socket, admin, action, rawNickname, rawRole, 
 
     await updateAccountPassword(nickname, await hashPassword(password));
     emitPrivateSystem(socket, `Mot de passe de ${account.displayName} reinitialise.`);
+    await recordModerationAction(
+      logActor,
+      "password_reset",
+      account.displayName,
+      "Mot de passe reinitialise"
+    );
     await sendAccountList(socket);
   }
 }
@@ -506,6 +538,7 @@ async function handleRoomAction(socket, admin, action, rawName, rawTopic) {
     });
     io.emit("rooms", getRoomList());
     await sendSystem(admin.room, `${admin.nickname} a cree le salon #${name}.`);
+    await recordModerationAction(admin, "room_created", `#${name}`, `Sujet : ${topic}`);
     return;
   }
 
@@ -523,6 +556,7 @@ async function handleRoomAction(socket, admin, action, rawName, rawTopic) {
       topic,
     });
     await sendSystem(name, `Sujet du salon mis a jour : ${topic}`);
+    await recordModerationAction(admin, "room_topic", `#${name}`, `Nouveau sujet : ${topic}`);
     return;
   }
 
@@ -553,6 +587,28 @@ async function handleRoomAction(socket, admin, action, rawName, rawTopic) {
     io.emit("rooms", getRoomList());
     publishUsers("accueil");
     await sendSystem("accueil", `${admin.nickname} a supprime le salon #${name}.`);
+    await recordModerationAction(admin, "room_deleted", `#${name}`, "Salon supprime");
+  }
+}
+
+async function sendModerationLogs(socket) {
+  socket.emit("moderation-logs", await listModerationLogs(100));
+}
+
+async function recordModerationAction(actor, action, target, details) {
+  await saveModerationLog({
+    id: crypto.randomUUID(),
+    actor: actor.nickname,
+    actorRole: actor.role,
+    action,
+    target,
+    details,
+    createdAt: Date.now(),
+  });
+
+  const logs = await listModerationLogs(100);
+  for (const [socketId, user] of users.entries()) {
+    if (user.role === "admin") io.to(socketId).emit("moderation-logs", logs);
   }
 }
 
@@ -636,6 +692,7 @@ async function handleModeration(socket, admin, action, rawTarget) {
   if (action === "unban") {
     await unbanNickname(normalizedTarget);
     await sendSystem(admin.room, `${targetName} n'est plus banni.`);
+    await recordModerationAction(admin, "unban", targetName, "Bannissement retire");
     return;
   }
 
@@ -667,8 +724,10 @@ async function handleModeration(socket, admin, action, rawTarget) {
   if (action === "ban") {
     await banNickname(normalizeName(targetUser.nickname), targetUser.nickname, admin.nickname);
     await sendSystem(targetUser.room, `${targetUser.nickname} a ete banni par ${admin.nickname}.`);
+    await recordModerationAction(admin, "ban", targetUser.nickname, `Salon #${targetUser.room}`);
   } else {
     await sendSystem(targetUser.room, `${targetUser.nickname} a ete exclu par ${admin.nickname}.`);
+    await recordModerationAction(admin, "kick", targetUser.nickname, `Salon #${targetUser.room}`);
   }
 
   io.to(targetSocketId).emit("moderated", {
