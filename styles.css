@@ -1747,6 +1747,19 @@ button {
   background: #263a35;
 }
 
+.sidebar-account-actions {
+  flex: 0 0 auto;
+  display: flex;
+  gap: 5px;
+}
+
+.sidebar-account-actions .icon-button {
+  width: 32px;
+  min-width: 32px;
+  min-height: 32px;
+  padding: 0;
+}
+
 .sidebar-legal-links {
   justify-content: center;
   gap: 7px 10px;
@@ -2148,6 +2161,7 @@ button {
 
 .admin-dialog::backdrop,
 .profile-dialog::backdrop,
+.settings-dialog::backdrop,
 .private-dialog::backdrop,
 .report-dialog::backdrop {
   background: rgba(14, 24, 21, 0.56);
@@ -2242,9 +2256,182 @@ button {
 }
 
 .profile-dialog,
+.settings-dialog,
 .private-dialog,
 .report-dialog {
   border-radius: 8px;
+}
+
+.settings-dialog {
+  width: min(680px, calc(100% - 32px));
+  max-height: calc(100vh - 32px);
+  overflow-y: auto;
+  border: 1px solid var(--line);
+  padding: 28px;
+  color: var(--ink);
+  background: #fff;
+  box-shadow: var(--shadow);
+}
+
+.settings-header {
+  padding-right: 40px;
+}
+
+.settings-header h2 {
+  margin-bottom: 7px;
+  font-size: 24px;
+}
+
+.settings-account-id {
+  margin-bottom: 24px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.settings-account-id strong {
+  color: var(--ink);
+}
+
+.settings-form {
+  display: block;
+}
+
+.settings-section {
+  display: grid;
+  gap: 10px;
+  padding: 22px 0;
+  border-top: 1px solid var(--line);
+}
+
+.settings-section h3 {
+  margin: 0 0 4px;
+  font-size: 16px;
+}
+
+.settings-section label {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.settings-section > button[type="submit"] {
+  justify-self: start;
+  margin-top: 4px;
+}
+
+.settings-toggle {
+  min-height: 58px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  border-bottom: 1px solid var(--line);
+  color: var(--ink) !important;
+}
+
+.settings-toggle > span {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+}
+
+.settings-toggle strong,
+.settings-toggle small {
+  overflow-wrap: anywhere;
+}
+
+.settings-toggle small {
+  color: var(--muted);
+  font-weight: 400;
+}
+
+.settings-toggle input,
+.settings-confirm-delete input {
+  width: 20px;
+  min-width: 20px;
+  min-height: 20px;
+}
+
+.settings-status {
+  min-height: 18px;
+  margin: 0;
+  color: var(--accent-dark);
+  font-size: 12px;
+}
+
+.settings-status.is-error {
+  color: #a23818;
+}
+
+.settings-section-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.settings-section-title span {
+  min-width: 24px;
+  height: 24px;
+  display: inline-grid;
+  place-items: center;
+  border-radius: 50%;
+  color: var(--accent-dark);
+  background: var(--soft);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.settings-blocked-list {
+  display: grid;
+  gap: 7px;
+}
+
+.settings-blocked-user {
+  min-height: 48px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 7px 9px;
+  background: var(--canvas);
+}
+
+.settings-blocked-user strong {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.settings-blocked-user button {
+  min-height: 34px;
+  border: 1px solid var(--line);
+  padding: 0 10px;
+  color: var(--accent-dark);
+  background: #fff;
+  font-size: 12px;
+}
+
+.settings-empty {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.settings-danger .settings-section {
+  border-top-color: rgba(199, 92, 45, 0.42);
+}
+
+.settings-danger h3 {
+  color: #9f4320;
+}
+
+.settings-confirm-delete {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  color: var(--ink) !important;
+  font-weight: 400 !important;
+  line-height: 1.4;
 }
 
 .private-sidebar,
@@ -2472,6 +2659,7 @@ button {
   }
 
   .profile-dialog,
+  .settings-dialog,
   .report-dialog {
     width: calc(100% - 20px);
     max-height: calc(100dvh - 20px);

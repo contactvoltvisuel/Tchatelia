@@ -52,6 +52,7 @@ export async function initDatabase() {
       active INTEGER NOT NULL DEFAULT 1,
       bio TEXT NOT NULL DEFAULT '',
       avatar_url TEXT NOT NULL DEFAULT '',
+      private_messages_enabled INTEGER NOT NULL DEFAULT 1,
       created_at INTEGER NOT NULL
     );
 
@@ -150,6 +151,14 @@ export async function initDatabase() {
     if (!String(error.message).includes("duplicate column")) throw error;
   }
 
+  try {
+    db.exec(
+      "ALTER TABLE accounts ADD COLUMN private_messages_enabled INTEGER NOT NULL DEFAULT 1"
+    );
+  } catch (error) {
+    if (!String(error.message).includes("duplicate column")) throw error;
+  }
+
   const insertRoom = db.prepare(`
     INSERT OR IGNORE INTO rooms (name, topic, created_at)
     VALUES (?, ?, ?)
@@ -172,7 +181,9 @@ export async function getAccountByNickname(nickname) {
   return db
     .prepare(`
       SELECT nickname, display_name AS displayName, password_hash AS passwordHash, salt, role, active,
-        bio, avatar_url AS avatarUrl, created_at AS createdAt
+        bio, avatar_url AS avatarUrl,
+        private_messages_enabled AS privateMessagesEnabled,
+        created_at AS createdAt
       FROM accounts
       WHERE nickname = ?
     `)
@@ -182,7 +193,9 @@ export async function getAccountByNickname(nickname) {
 export async function listAccounts() {
   return db
     .prepare(`
-      SELECT nickname, display_name AS displayName, role, active, created_at AS createdAt
+      SELECT nickname, display_name AS displayName, role, active,
+        private_messages_enabled AS privateMessagesEnabled,
+        created_at AS createdAt
       FROM accounts
       ORDER BY created_at DESC
     `)
@@ -311,10 +324,12 @@ export async function getPrivateBlockState(accountA, accountB) {
 export async function listPrivateBlocks(blocker) {
   return db
     .prepare(`
-      SELECT blocked, created_at AS createdAt
+      SELECT private_blocks.blocked, private_blocks.created_at AS createdAt,
+        accounts.display_name AS displayName
       FROM private_blocks
-      WHERE blocker = ?
-      ORDER BY created_at DESC
+      JOIN accounts ON accounts.nickname = private_blocks.blocked
+      WHERE private_blocks.blocker = ?
+      ORDER BY private_blocks.created_at DESC
     `)
     .all(blocker);
 }
@@ -509,6 +524,38 @@ export async function updateAccountProfile(nickname, profile) {
     profile.avatarUrl,
     nickname
   );
+}
+
+export async function updateAccountSettings(nickname, settings) {
+  db.prepare(`
+    UPDATE accounts
+    SET display_name = ?, private_messages_enabled = ?
+    WHERE nickname = ?
+  `).run(
+    settings.displayName,
+    settings.privateMessagesEnabled ? 1 : 0,
+    nickname
+  );
+}
+
+export async function deleteAccount(nickname) {
+  db.exec("BEGIN");
+  try {
+    db.prepare("DELETE FROM reports WHERE reporter = ?").run(nickname);
+    db.prepare("DELETE FROM private_blocks WHERE blocker = ? OR blocked = ?").run(
+      nickname,
+      nickname
+    );
+    db.prepare("DELETE FROM private_messages WHERE sender = ? OR recipient = ?").run(
+      nickname,
+      nickname
+    );
+    db.prepare("DELETE FROM accounts WHERE nickname = ?").run(nickname);
+    db.exec("COMMIT");
+  } catch (error) {
+    db.exec("ROLLBACK");
+    throw error;
+  }
 }
 
 export async function createRoom(name, topic) {

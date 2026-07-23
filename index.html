@@ -141,15 +141,26 @@
                 <small id="currentUserRole">Hors ligne</small>
               </div>
             </div>
-            <button
-              class="icon-button hidden"
-              id="sidebarProfileButton"
-              type="button"
-              aria-label="Ouvrir mon profil"
-              title="Mon profil"
-            >
-              &#9786;
-            </button>
+            <div class="sidebar-account-actions">
+              <button
+                class="icon-button hidden"
+                id="sidebarProfileButton"
+                type="button"
+                aria-label="Ouvrir mon profil"
+                title="Mon profil"
+              >
+                &#9786;
+              </button>
+              <button
+                class="icon-button hidden"
+                id="accountSettingsButton"
+                type="button"
+                aria-label="Ouvrir les parametres du compte"
+                title="Parametres du compte"
+              >
+                &#9881;
+              </button>
+            </div>
           </div>
 
           <nav class="sidebar-legal-links" aria-label="Informations legales">
@@ -403,6 +414,111 @@
         <label for="profileBioInput">Description</label>
         <textarea id="profileBioInput" maxlength="180" rows="4"></textarea>
         <button type="submit">Enregistrer</button>
+      </form>
+    </dialog>
+
+    <dialog class="settings-dialog" id="settingsDialog">
+      <button
+        class="profile-close-button"
+        id="settingsCloseButton"
+        type="button"
+        aria-label="Fermer"
+      >
+        X
+      </button>
+      <header class="settings-header">
+        <p class="eyebrow">Mon compte</p>
+        <h2>Parametres</h2>
+        <p class="settings-account-id">
+          Identifiant : <strong id="settingsAccountNickname"></strong>
+        </p>
+      </header>
+
+      <form class="settings-form" id="settingsGeneralForm">
+        <section class="settings-section">
+          <h3>Profil et confidentialite</h3>
+          <label for="settingsDisplayName">Nom affiche</label>
+          <input
+            id="settingsDisplayName"
+            maxlength="18"
+            autocomplete="nickname"
+            required
+          />
+          <label class="settings-toggle">
+            <span>
+              <strong>Notifications</strong>
+              <small>Mentions et messages prives</small>
+            </span>
+            <input id="settingsNotifications" type="checkbox" />
+          </label>
+          <label class="settings-toggle">
+            <span>
+              <strong>Messages prives</strong>
+              <small>Autoriser les autres membres a me contacter</small>
+            </span>
+            <input id="settingsPrivateMessages" type="checkbox" />
+          </label>
+          <button type="submit">Enregistrer les preferences</button>
+          <p class="settings-status" id="settingsGeneralStatus" role="status"></p>
+        </section>
+      </form>
+
+      <form class="settings-form" id="settingsPasswordForm">
+        <section class="settings-section">
+          <h3>Mot de passe</h3>
+          <label for="settingsCurrentPassword">Mot de passe actuel</label>
+          <input
+            id="settingsCurrentPassword"
+            type="password"
+            autocomplete="current-password"
+            required
+          />
+          <label for="settingsNewPassword">Nouveau mot de passe</label>
+          <input
+            id="settingsNewPassword"
+            type="password"
+            minlength="6"
+            autocomplete="new-password"
+            required
+          />
+          <label for="settingsConfirmPassword">Confirmer le nouveau mot de passe</label>
+          <input
+            id="settingsConfirmPassword"
+            type="password"
+            minlength="6"
+            autocomplete="new-password"
+            required
+          />
+          <button type="submit">Modifier le mot de passe</button>
+          <p class="settings-status" id="settingsPasswordStatus" role="status"></p>
+        </section>
+      </form>
+
+      <section class="settings-section">
+        <div class="settings-section-title">
+          <h3>Utilisateurs bloques</h3>
+          <span id="settingsBlockedCount">0</span>
+        </div>
+        <div class="settings-blocked-list" id="settingsBlockedList"></div>
+      </section>
+
+      <form class="settings-form settings-danger" id="settingsDeleteForm">
+        <section class="settings-section">
+          <h3>Supprimer le compte</h3>
+          <label for="settingsDeletePassword">Mot de passe actuel</label>
+          <input
+            id="settingsDeletePassword"
+            type="password"
+            autocomplete="current-password"
+            required
+          />
+          <label class="settings-confirm-delete">
+            <input id="settingsDeleteConfirm" type="checkbox" required />
+            <span>Je confirme la suppression definitive de mon compte.</span>
+          </label>
+          <button class="danger-button" type="submit">Supprimer mon compte</button>
+          <p class="settings-status" id="settingsDeleteStatus" role="status"></p>
+        </section>
       </form>
     </dialog>
 

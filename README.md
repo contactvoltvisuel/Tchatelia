@@ -8,6 +8,8 @@ Prerequis : Node.js 24 ou plus recent.
 
 - Pseudo libre, sans inscription.
 - Comptes utilisateurs avec pseudo reserve et mot de passe.
+- Parametres du compte : nom affiche, notifications, messages prives et blocages.
+- Changement du mot de passe et suppression autonome du compte.
 - Connexion invitee toujours disponible pour les pseudos non reserves.
 - Gestion admin des comptes : role, activation et reinitialisation de mot de passe.
 - Salons publics : `#accueil`, `#aide`, `#musique`, `#rencontres`.

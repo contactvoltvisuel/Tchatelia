@@ -47,6 +47,7 @@ export async function initDatabase() {
       active BOOLEAN NOT NULL DEFAULT TRUE,
       bio TEXT NOT NULL DEFAULT '',
       avatar_url TEXT NOT NULL DEFAULT '',
+      private_messages_enabled BOOLEAN NOT NULL DEFAULT TRUE,
       created_at BIGINT NOT NULL
     );
 
@@ -125,6 +126,9 @@ export async function initDatabase() {
   await pool.query("ALTER TABLE accounts ADD COLUMN IF NOT EXISTS active BOOLEAN NOT NULL DEFAULT TRUE");
   await pool.query("ALTER TABLE accounts ADD COLUMN IF NOT EXISTS bio TEXT NOT NULL DEFAULT ''");
   await pool.query("ALTER TABLE accounts ADD COLUMN IF NOT EXISTS avatar_url TEXT NOT NULL DEFAULT ''");
+  await pool.query(
+    "ALTER TABLE accounts ADD COLUMN IF NOT EXISTS private_messages_enabled BOOLEAN NOT NULL DEFAULT TRUE"
+  );
 
   for (const [name, topic] of defaultRooms) {
     await pool.query(
@@ -151,7 +155,9 @@ export async function getAccountByNickname(nickname) {
   const result = await pool.query(
     `
       SELECT nickname, display_name AS "displayName", password_hash AS "passwordHash", salt, role, active,
-        bio, avatar_url AS "avatarUrl", created_at AS "createdAt"
+        bio, avatar_url AS "avatarUrl",
+        private_messages_enabled AS "privateMessagesEnabled",
+        created_at AS "createdAt"
       FROM accounts
       WHERE nickname = $1
     `,
@@ -162,7 +168,9 @@ export async function getAccountByNickname(nickname) {
 
 export async function listAccounts() {
   const result = await pool.query(`
-    SELECT nickname, display_name AS "displayName", role, active, created_at AS "createdAt"
+    SELECT nickname, display_name AS "displayName", role, active,
+      private_messages_enabled AS "privateMessagesEnabled",
+      created_at AS "createdAt"
     FROM accounts
     ORDER BY created_at DESC
   `);
@@ -304,10 +312,12 @@ export async function getPrivateBlockState(accountA, accountB) {
 export async function listPrivateBlocks(blocker) {
   const result = await pool.query(
     `
-      SELECT blocked, created_at AS "createdAt"
+      SELECT private_blocks.blocked, private_blocks.created_at AS "createdAt",
+        accounts.display_name AS "displayName"
       FROM private_blocks
-      WHERE blocker = $1
-      ORDER BY created_at DESC
+      JOIN accounts ON accounts.nickname = private_blocks.blocked
+      WHERE private_blocks.blocker = $1
+      ORDER BY private_blocks.created_at DESC
     `,
     [blocker]
   );
@@ -530,6 +540,40 @@ export async function updateAccountProfile(nickname, profile) {
     profile.avatarUrl,
     nickname,
   ]);
+}
+
+export async function updateAccountSettings(nickname, settings) {
+  await pool.query(
+    `
+      UPDATE accounts
+      SET display_name = $1, private_messages_enabled = $2
+      WHERE nickname = $3
+    `,
+    [settings.displayName, settings.privateMessagesEnabled, nickname]
+  );
+}
+
+export async function deleteAccount(nickname) {
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    await client.query("DELETE FROM reports WHERE reporter = $1", [nickname]);
+    await client.query(
+      "DELETE FROM private_blocks WHERE blocker = $1 OR blocked = $1",
+      [nickname]
+    );
+    await client.query(
+      "DELETE FROM private_messages WHERE sender = $1 OR recipient = $1",
+      [nickname]
+    );
+    await client.query("DELETE FROM accounts WHERE nickname = $1", [nickname]);
+    await client.query("COMMIT");
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
 }
 
 export async function createRoom(name, topic) {

@@ -13,6 +13,7 @@ import {
   createAccount,
   createReport,
   createRoom,
+  deleteAccount,
   deleteRoom,
   getAccountByNickname,
   getContactMessageById,
@@ -43,6 +44,7 @@ import {
   unbanNickname,
   updateAccountPassword,
   updateAccountProfile,
+  updateAccountSettings,
   updateAccountRole,
   updateContactMessageStatus,
   updateRoomTopic,
@@ -221,7 +223,7 @@ io.on("connection", (socket) => {
         return;
       }
 
-      const existingAccount = await getAccountByNickname(normalizedNickname);
+      const existingAccount = await findAccountByIdentity(cleanNickname);
       if (existingAccount) {
         callback?.({
           ok: false,
@@ -240,7 +242,8 @@ io.on("connection", (socket) => {
       });
     }
 
-    const account = await getAccountByNickname(normalizedNickname);
+    const account = await findAccountByIdentity(cleanNickname);
+    const accountNickname = account?.nickname || normalizedNickname;
 
     if (account && cleanAuthMode !== "register") {
       if (!account.active) {
@@ -279,7 +282,10 @@ io.on("connection", (socket) => {
     const role = account?.role || (isAdmin ? "admin" : "user");
     const displayName = account?.displayName || cleanNickname;
 
-    if (await isBanned(normalizedNickname)) {
+    if (
+      (await isBanned(normalizedNickname)) ||
+      (account && account.nickname !== normalizedNickname && (await isBanned(account.nickname)))
+    ) {
       callback?.({
         ok: false,
         error: "Ce pseudo est banni du chat.",
@@ -292,9 +298,12 @@ io.on("connection", (socket) => {
       room: cleanRoom,
       role,
       account: Boolean(account || cleanAuthMode === "register"),
-      accountNickname: account || cleanAuthMode === "register" ? normalizedNickname : null,
+      accountNickname: account || cleanAuthMode === "register" ? accountNickname : null,
       bio: account?.bio || "",
       avatarUrl: account?.avatarUrl || "",
+      privateMessagesEnabled: account
+        ? Boolean(account.privateMessagesEnabled)
+        : true,
       memberSince: account?.createdAt || Date.now(),
       messageTimes: [],
       lastMessage: "",
@@ -317,7 +326,7 @@ io.on("connection", (socket) => {
       await sendReports(socket);
     }
     if (account || cleanAuthMode === "register") {
-      await sendPrivateState(socket, normalizedNickname);
+      await sendPrivateState(socket, accountNickname);
     }
 
     callback?.({
@@ -326,7 +335,7 @@ io.on("connection", (socket) => {
       room: cleanRoom,
       role,
       account: Boolean(account || cleanAuthMode === "register"),
-      accountNickname: account || cleanAuthMode === "register" ? normalizedNickname : "",
+      accountNickname: account || cleanAuthMode === "register" ? accountNickname : "",
       topic: rooms.get(cleanRoom).topic,
     });
   });
@@ -532,6 +541,24 @@ io.on("connection", (socket) => {
     await sendProfile(socket, user, user.nickname);
   });
 
+  socket.on("settings-action", async (payload = {}, callback) => {
+    const user = users.get(socket.id);
+    if (!user?.accountNickname) {
+      callback?.({ ok: false, error: "Les parametres sont reserves aux comptes inscrits." });
+      return;
+    }
+
+    try {
+      await handleSettingsAction(socket, user, payload, callback);
+    } catch (error) {
+      console.error("Erreur parametres du compte:", error);
+      callback?.({
+        ok: false,
+        error: "Les parametres n'ont pas pu etre mis a jour. Reessaie plus tard.",
+      });
+    }
+  });
+
   socket.on("private-action", async (payload = {}) => {
     const user = users.get(socket.id);
     if (!user) return;
@@ -592,6 +619,25 @@ function cleanName(value) {
 
 function normalizeName(value) {
   return String(value || "").trim().toLocaleLowerCase("fr-FR");
+}
+
+function cleanDisplayName(value) {
+  return String(value || "")
+    .replace(/[^\p{L}\p{N}_-]/gu, "")
+    .slice(0, 18);
+}
+
+async function findAccountByIdentity(rawNickname) {
+  const normalized = normalizeName(rawNickname);
+  if (!normalized) return null;
+
+  const directAccount = await getAccountByNickname(normalized);
+  if (directAccount) return directAccount;
+
+  const accountMatch = (await listAccounts()).find(
+    (account) => normalizeName(account.displayName) === normalized
+  );
+  return accountMatch ? getAccountByNickname(accountMatch.nickname) : null;
 }
 
 async function hashPassword(password) {
@@ -659,7 +705,12 @@ async function sendProfile(socket, viewer, rawNickname) {
     return;
   }
 
-  const account = await getAccountByNickname(nickname);
+  const connectedTarget = findUserByNickname(rawNickname);
+  const account =
+    (await getAccountByNickname(nickname)) ||
+    (connectedTarget?.[1].accountNickname
+      ? await getAccountByNickname(connectedTarget[1].accountNickname)
+      : null);
   if (account) {
     socket.emit("profile", {
       accountNickname: account.nickname,
@@ -670,17 +721,17 @@ async function sendProfile(socket, viewer, rawNickname) {
       createdAt: account.createdAt,
       account: true,
       isOwn: viewer.accountNickname === account.nickname,
+      privateMessagesEnabled: Boolean(account.privateMessagesEnabled),
     });
     return;
   }
 
-  const targetEntry = findUserByNickname(rawNickname);
-  if (!targetEntry) {
+  if (!connectedTarget) {
     emitPrivateSystem(socket, "Profil introuvable.");
     return;
   }
 
-  const target = targetEntry[1];
+  const target = connectedTarget[1];
   socket.emit("profile", {
     accountNickname: "",
     nickname: target.nickname,
@@ -690,7 +741,147 @@ async function sendProfile(socket, viewer, rawNickname) {
     createdAt: target.memberSince,
     account: false,
     isOwn: false,
+    privateMessagesEnabled: false,
   });
+}
+
+async function buildAccountSettings(accountNickname) {
+  const [account, blockedUsers] = await Promise.all([
+    getAccountByNickname(accountNickname),
+    listPrivateBlocks(accountNickname),
+  ]);
+  if (!account) return null;
+
+  return {
+    accountNickname: account.nickname,
+    displayName: account.displayName,
+    privateMessagesEnabled: Boolean(account.privateMessagesEnabled),
+    blockedUsers: blockedUsers.map((blockedUser) => ({
+      accountNickname: blockedUser.blocked,
+      displayName: blockedUser.displayName,
+      createdAt: blockedUser.createdAt,
+    })),
+  };
+}
+
+async function handleSettingsAction(socket, user, payload, callback) {
+  const action = String(payload.action || "");
+  const account = await getAccountByNickname(user.accountNickname);
+  if (!account) {
+    callback?.({ ok: false, error: "Compte introuvable." });
+    return;
+  }
+
+  if (action === "get") {
+    callback?.({ ok: true, settings: await buildAccountSettings(account.nickname) });
+    return;
+  }
+
+  if (action === "update") {
+    const displayName = cleanDisplayName(payload.displayName);
+    if (displayName.length < 2) {
+      callback?.({ ok: false, error: "Le nom affiche doit contenir au moins 2 caracteres." });
+      return;
+    }
+
+    const normalizedDisplayName = normalizeName(displayName);
+    if (await isBanned(normalizedDisplayName)) {
+      callback?.({ ok: false, error: "Ce nom affiche est banni du chat." });
+      return;
+    }
+
+    const conflictingAccount = (await listAccounts()).find(
+      (candidate) =>
+        candidate.nickname !== account.nickname &&
+        (normalizeName(candidate.nickname) === normalizedDisplayName ||
+          normalizeName(candidate.displayName) === normalizedDisplayName)
+    );
+    const conflictingUser = [...users.values()].find(
+      (candidate) =>
+        candidate.accountNickname !== account.nickname &&
+        normalizeName(candidate.nickname) === normalizedDisplayName
+    );
+    if (conflictingAccount || conflictingUser) {
+      callback?.({ ok: false, error: "Ce nom affiche est deja utilise." });
+      return;
+    }
+
+    const privateMessagesEnabled = payload.privateMessagesEnabled === true;
+    await updateAccountSettings(account.nickname, {
+      displayName,
+      privateMessagesEnabled,
+    });
+    updateConnectedAccount(account.nickname, {
+      nickname: displayName,
+      privateMessagesEnabled,
+    });
+    emitToAccount(account.nickname, "account-updated", {
+      nickname: displayName,
+      privateMessagesEnabled,
+    });
+    for (const room of rooms.keys()) publishUsers(room);
+    await publishAccountLists();
+    await refreshPrivateStatesForConnectedAccounts();
+    callback?.({ ok: true, settings: await buildAccountSettings(account.nickname) });
+    return;
+  }
+
+  if (action === "password") {
+    const currentPassword = String(payload.currentPassword || "");
+    const newPassword = String(payload.newPassword || "");
+    if (!(await verifyPassword(currentPassword, account))) {
+      callback?.({ ok: false, error: "Le mot de passe actuel est incorrect." });
+      return;
+    }
+    if (newPassword.length < 6) {
+      callback?.({
+        ok: false,
+        error: "Le nouveau mot de passe doit faire au moins 6 caracteres.",
+      });
+      return;
+    }
+    if (currentPassword === newPassword) {
+      callback?.({ ok: false, error: "Choisis un nouveau mot de passe different." });
+      return;
+    }
+
+    await updateAccountPassword(account.nickname, await hashPassword(newPassword));
+    callback?.({ ok: true, message: "Mot de passe modifie." });
+    return;
+  }
+
+  if (action === "unblock") {
+    const blockedNickname = normalizeName(payload.nickname);
+    if (!blockedNickname || blockedNickname === account.nickname) {
+      callback?.({ ok: false, error: "Compte bloque introuvable." });
+      return;
+    }
+    await setPrivateBlock(account.nickname, blockedNickname, false);
+    emitToAccount(blockedNickname, "private-block-changed", {
+      nickname: account.nickname,
+    });
+    await refreshPrivateStateForAccount(account.nickname);
+    callback?.({ ok: true, settings: await buildAccountSettings(account.nickname) });
+    return;
+  }
+
+  if (action === "delete") {
+    const currentPassword = String(payload.currentPassword || "");
+    if (!(await verifyPassword(currentPassword, account))) {
+      callback?.({ ok: false, error: "Le mot de passe actuel est incorrect." });
+      return;
+    }
+
+    await deleteAccount(account.nickname);
+    callback?.({ ok: true });
+    emitToAccount(account.nickname, "account-deleted", {});
+    await publishAccountLists();
+    await refreshPrivateStatesForConnectedAccounts(account.nickname);
+    disconnectDeletedAccountLater(account.nickname);
+    return;
+  }
+
+  callback?.({ ok: false, error: "Action inconnue." });
 }
 
 async function handlePrivateAction(socket, user, payload) {
@@ -736,6 +927,14 @@ async function handlePrivateAction(socket, user, payload) {
   if (action !== "send") return;
   if (!targetAccount.active) {
     emitPrivateError(socket, "Ce compte est desactive.");
+    return;
+  }
+  if (!user.privateMessagesEnabled) {
+    emitPrivateError(socket, "Reactive les messages prives dans tes parametres.");
+    return;
+  }
+  if (!Boolean(targetAccount.privateMessagesEnabled)) {
+    emitPrivateError(socket, "Cette personne n'accepte pas les messages prives.");
     return;
   }
 
@@ -796,6 +995,7 @@ async function sendPrivateConversation(socket, accountNickname, targetAccount) {
       accountNickname: targetAccount.nickname,
       nickname: targetAccount.displayName,
       role: targetAccount.role,
+      privateMessagesEnabled: Boolean(targetAccount.privateMessagesEnabled),
       avatarUrl: targetAccount.avatarUrl
         ? `/avatar/${encodeURIComponent(targetAccount.nickname)}`
         : "",
@@ -808,7 +1008,7 @@ async function sendPrivateConversation(socket, accountNickname, targetAccount) {
     })),
     blockedByMe: blockState.blockedByMe,
     blockedByThem: blockState.blockedByThem,
-    available: Boolean(targetAccount.active),
+    available: Boolean(targetAccount.active && targetAccount.privateMessagesEnabled),
   });
 
   await refreshPrivateStateForAccount(accountNickname);
@@ -883,6 +1083,22 @@ async function sendPrivateState(socket, accountNickname) {
 async function refreshPrivateStateForAccount(accountNickname) {
   const state = await buildPrivateState(accountNickname);
   emitToAccount(accountNickname, "private-state", state);
+}
+
+async function refreshPrivateStatesForConnectedAccounts(excludedAccount = "") {
+  const connectedAccounts = new Set(
+    [...users.values()]
+      .map((connectedUser) => connectedUser.accountNickname)
+      .filter(
+        (accountNickname) =>
+          accountNickname && accountNickname !== excludedAccount
+      )
+  );
+  await Promise.all(
+    [...connectedAccounts].map((accountNickname) =>
+      refreshPrivateStateForAccount(accountNickname)
+    )
+  );
 }
 
 function emitToAccount(accountNickname, event, payload) {
@@ -1104,6 +1320,15 @@ async function sendAccountList(socket) {
   socket.emit("accounts", accounts);
 }
 
+async function publishAccountLists() {
+  const accounts = await listAccounts();
+  for (const [socketId, connectedUser] of users.entries()) {
+    if (connectedUser.role === "admin") {
+      io.to(socketId).emit("accounts", accounts);
+    }
+  }
+}
+
 async function handleAccountAction(socket, admin, action, rawNickname, rawRole, rawPassword) {
   if (action === "list") {
     await sendAccountList(socket);
@@ -1193,6 +1418,15 @@ function disconnectAccount(accountNickname, reason) {
     io.to(socketId).emit("moderated", { reason });
     io.sockets.sockets.get(socketId)?.disconnect(true);
   }
+}
+
+function disconnectDeletedAccountLater(accountNickname) {
+  setTimeout(() => {
+    for (const [socketId, user] of users.entries()) {
+      if (user.accountNickname !== accountNickname) continue;
+      io.sockets.sockets.get(socketId)?.disconnect(true);
+    }
+  }, 150);
 }
 
 async function handleRoomAction(socket, admin, action, rawName, rawTopic) {

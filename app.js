@@ -82,12 +82,32 @@ const currentUserName = document.querySelector("#currentUserName");
 const currentUserRole = document.querySelector("#currentUserRole");
 const currentUserInitials = document.querySelector("#currentUserInitials");
 const sidebarProfileButton = document.querySelector("#sidebarProfileButton");
+const accountSettingsButton = document.querySelector("#accountSettingsButton");
 const adminPanelButton = document.querySelector("#adminPanelButton");
 const adminDialog = document.querySelector("#adminDialog");
 const adminCloseButton = document.querySelector("#adminCloseButton");
 const notificationToggleButton = document.querySelector("#notificationToggleButton");
 const notificationState = document.querySelector("#notificationState");
 const notificationStack = document.querySelector("#notificationStack");
+const settingsDialog = document.querySelector("#settingsDialog");
+const settingsCloseButton = document.querySelector("#settingsCloseButton");
+const settingsAccountNickname = document.querySelector("#settingsAccountNickname");
+const settingsGeneralForm = document.querySelector("#settingsGeneralForm");
+const settingsDisplayName = document.querySelector("#settingsDisplayName");
+const settingsNotifications = document.querySelector("#settingsNotifications");
+const settingsPrivateMessages = document.querySelector("#settingsPrivateMessages");
+const settingsGeneralStatus = document.querySelector("#settingsGeneralStatus");
+const settingsPasswordForm = document.querySelector("#settingsPasswordForm");
+const settingsCurrentPassword = document.querySelector("#settingsCurrentPassword");
+const settingsNewPassword = document.querySelector("#settingsNewPassword");
+const settingsConfirmPassword = document.querySelector("#settingsConfirmPassword");
+const settingsPasswordStatus = document.querySelector("#settingsPasswordStatus");
+const settingsBlockedCount = document.querySelector("#settingsBlockedCount");
+const settingsBlockedList = document.querySelector("#settingsBlockedList");
+const settingsDeleteForm = document.querySelector("#settingsDeleteForm");
+const settingsDeletePassword = document.querySelector("#settingsDeletePassword");
+const settingsDeleteConfirm = document.querySelector("#settingsDeleteConfirm");
+const settingsDeleteStatus = document.querySelector("#settingsDeleteStatus");
 
 let currentRoom = "accueil";
 let currentNickname = "";
@@ -168,45 +188,14 @@ privateMessagesButton.addEventListener("click", () => {
 });
 
 notificationToggleButton.addEventListener("click", async () => {
-  if (alertsEnabled) {
-    alertsEnabled = false;
-    localStorage.removeItem("tchateliaAlerts");
-    updateNotificationButton();
-    showNotificationToast("Alertes desactivees", "Les compteurs non lus restent actifs.");
-    return;
-  }
-
-  if (typeof Notification === "undefined") {
-    showNotificationToast(
-      "Notifications indisponibles",
-      "Ce navigateur ne prend pas en charge les notifications."
-    );
-    return;
-  }
-
-  const permission =
-    Notification.permission === "default"
-      ? await Notification.requestPermission()
-      : Notification.permission;
-
-  if (permission !== "granted") {
-    showNotificationToast(
-      "Autorisation refusee",
-      "Tu peux modifier ce choix dans les reglages du navigateur."
-    );
-    return;
-  }
-
-  alertsEnabled = true;
-  localStorage.setItem("tchateliaAlerts", "enabled");
-  ensureAudioContext();
-  updateNotificationButton();
-  showNotificationToast("Alertes activees", "Les mentions et messages prives seront signales.");
+  await setAlertsPreference(!alertsEnabled);
 });
 
 sidebarProfileButton.addEventListener("click", () => {
   requestProfile(currentNickname);
 });
+
+accountSettingsButton.addEventListener("click", openAccountSettings);
 
 roomSidebarButton.addEventListener("click", () => {
   openMobilePanel(roomSidebar);
@@ -246,6 +235,104 @@ profileCloseButton.addEventListener("click", () => {
 
 profileDialog.addEventListener("click", (event) => {
   if (event.target === profileDialog) profileDialog.close();
+});
+
+settingsCloseButton.addEventListener("click", () => {
+  settingsDialog.close();
+});
+
+settingsDialog.addEventListener("click", (event) => {
+  if (event.target === settingsDialog) settingsDialog.close();
+});
+
+settingsGeneralForm.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  setSettingsStatus(settingsGeneralStatus, "Enregistrement...");
+
+  const notificationsEnabled = await setAlertsPreference(
+    settingsNotifications.checked,
+    false
+  );
+  settingsNotifications.checked = notificationsEnabled;
+
+  socket.emit(
+    "settings-action",
+    {
+      action: "update",
+      displayName: settingsDisplayName.value,
+      privateMessagesEnabled: settingsPrivateMessages.checked,
+    },
+    (response) => {
+      if (!response?.ok) {
+        setSettingsStatus(
+          settingsGeneralStatus,
+          response?.error || "Impossible d'enregistrer les preferences.",
+          true
+        );
+        return;
+      }
+      renderAccountSettings(response.settings);
+      setSettingsStatus(settingsGeneralStatus, "Preferences enregistrees.");
+    }
+  );
+});
+
+settingsPasswordForm.addEventListener("submit", (event) => {
+  event.preventDefault();
+  if (settingsNewPassword.value !== settingsConfirmPassword.value) {
+    setSettingsStatus(
+      settingsPasswordStatus,
+      "Les deux nouveaux mots de passe sont differents.",
+      true
+    );
+    return;
+  }
+
+  setSettingsStatus(settingsPasswordStatus, "Modification...");
+  socket.emit(
+    "settings-action",
+    {
+      action: "password",
+      currentPassword: settingsCurrentPassword.value,
+      newPassword: settingsNewPassword.value,
+    },
+    (response) => {
+      if (!response?.ok) {
+        setSettingsStatus(
+          settingsPasswordStatus,
+          response?.error || "Impossible de modifier le mot de passe.",
+          true
+        );
+        return;
+      }
+      settingsPasswordForm.reset();
+      setSettingsStatus(settingsPasswordStatus, response.message || "Mot de passe modifie.");
+    }
+  );
+});
+
+settingsDeleteForm.addEventListener("submit", (event) => {
+  event.preventDefault();
+  if (!settingsDeleteConfirm.checked) return;
+  if (!confirm("Supprimer definitivement ce compte et ses messages prives ?")) return;
+
+  setSettingsStatus(settingsDeleteStatus, "Suppression...");
+  socket.emit(
+    "settings-action",
+    {
+      action: "delete",
+      currentPassword: settingsDeletePassword.value,
+    },
+    (response) => {
+      if (!response?.ok) {
+        setSettingsStatus(
+          settingsDeleteStatus,
+          response?.error || "Impossible de supprimer le compte.",
+          true
+        );
+      }
+    }
+  );
 });
 
 profilePrivateButton.addEventListener("click", () => {
@@ -606,6 +693,17 @@ socket.on("profile", (profile) => {
   renderProfile(profile);
 });
 
+socket.on("account-updated", ({ nickname }) => {
+  currentNickname = nickname;
+  updateCurrentUserSummary();
+  if (settingsDialog.open) settingsDisplayName.value = nickname;
+});
+
+socket.on("account-deleted", () => {
+  alert("Ton compte a ete supprime.");
+  window.location.reload();
+});
+
 socket.on("private-state", (state) => {
   privateConversations = state.conversations;
   privateUnreadTotal = state.totalUnread;
@@ -698,6 +796,7 @@ function showChat(response) {
   myProfileButton.classList.toggle("hidden", !currentAccount);
   privateMessagesButton.classList.toggle("hidden", !currentAccount);
   sidebarProfileButton.classList.toggle("hidden", !currentAccount);
+  accountSettingsButton.classList.toggle("hidden", !currentAccount);
   updateCurrentUserSummary();
   markCurrentRoomRead();
   updateNotificationButton();
@@ -1117,6 +1216,90 @@ function requestProfile(nickname) {
   });
 }
 
+function openAccountSettings() {
+  if (!currentAccount) return;
+  closeMobilePanels();
+  settingsGeneralForm.reset();
+  settingsPasswordForm.reset();
+  settingsDeleteForm.reset();
+  settingsNotifications.checked = alertsEnabled;
+  settingsBlockedList.innerHTML = "";
+  settingsBlockedCount.textContent = "0";
+  setSettingsStatus(settingsGeneralStatus, "");
+  setSettingsStatus(settingsPasswordStatus, "");
+  setSettingsStatus(settingsDeleteStatus, "");
+
+  socket.emit("settings-action", { action: "get" }, (response) => {
+    if (!response?.ok) {
+      alert(response?.error || "Impossible d'ouvrir les parametres.");
+      return;
+    }
+    renderAccountSettings(response.settings);
+    if (!settingsDialog.open) settingsDialog.showModal();
+  });
+}
+
+function renderAccountSettings(settings) {
+  if (!settings) return;
+  settingsAccountNickname.textContent = settings.accountNickname;
+  settingsDisplayName.value = settings.displayName;
+  settingsNotifications.checked = alertsEnabled;
+  settingsPrivateMessages.checked = settings.privateMessagesEnabled;
+  settingsBlockedList.innerHTML = "";
+  settingsBlockedCount.textContent = String(settings.blockedUsers.length);
+
+  if (!settings.blockedUsers.length) {
+    const empty = document.createElement("p");
+    empty.className = "settings-empty";
+    empty.textContent = "Aucun utilisateur bloque.";
+    settingsBlockedList.append(empty);
+    return;
+  }
+
+  settings.blockedUsers.forEach((blockedUser) => {
+    const row = document.createElement("div");
+    row.className = "settings-blocked-user";
+
+    const name = document.createElement("strong");
+    name.textContent = blockedUser.displayName;
+
+    const button = document.createElement("button");
+    button.type = "button";
+    button.textContent = "Debloquer";
+    button.addEventListener("click", () => {
+      button.disabled = true;
+      socket.emit(
+        "settings-action",
+        {
+          action: "unblock",
+          nickname: blockedUser.accountNickname,
+        },
+        (response) => {
+          if (!response?.ok) {
+            button.disabled = false;
+            setSettingsStatus(
+              settingsGeneralStatus,
+              response?.error || "Impossible de debloquer ce compte.",
+              true
+            );
+            return;
+          }
+          renderAccountSettings(response.settings);
+          setSettingsStatus(settingsGeneralStatus, `${blockedUser.displayName} a ete debloque.`);
+        }
+      );
+    });
+
+    row.append(name, button);
+    settingsBlockedList.append(row);
+  });
+}
+
+function setSettingsStatus(element, text, isError = false) {
+  element.textContent = text;
+  element.classList.toggle("is-error", isError);
+}
+
 function renderProfile(profile) {
   currentProfileAccountNickname = profile.accountNickname || "";
   currentProfileNickname = profile.nickname;
@@ -1134,7 +1317,10 @@ function renderProfile(profile) {
   profileForm.classList.toggle("hidden", !profile.isOwn);
   profilePrivateButton.classList.toggle(
     "hidden",
-    !currentAccount || !profile.account || profile.isOwn
+    !currentAccount ||
+      !profile.account ||
+      profile.isOwn ||
+      profile.privateMessagesEnabled === false
   );
   profileReportButton.classList.toggle("hidden", !currentAccount || profile.isOwn);
   if (profile.isOwn) {
@@ -1301,7 +1487,9 @@ function renderPrivateConversation(conversation) {
   const unavailable =
     conversation.blockedByMe || conversation.blockedByThem || !conversation.available;
   privateStatus.textContent = !conversation.available
-    ? "Compte desactive"
+    ? conversation.participant.privateMessagesEnabled === false
+      ? "Messages prives desactives"
+      : "Compte desactive"
     : conversation.blockedByMe
       ? "Utilisateur bloque"
       : conversation.blockedByThem
@@ -1416,6 +1604,62 @@ function updateNotificationButton() {
     ? "Desactiver les alertes"
     : "Activer les alertes";
   notificationState.textContent = alertsEnabled ? "on" : "off";
+}
+
+async function setAlertsPreference(enabled, showFeedback = true) {
+  if (!enabled) {
+    alertsEnabled = false;
+    localStorage.removeItem("tchateliaAlerts");
+    updateNotificationButton();
+    if (showFeedback) {
+      showNotificationToast(
+        "Alertes desactivees",
+        "Les compteurs non lus restent actifs."
+      );
+    }
+    return false;
+  }
+
+  if (typeof Notification === "undefined") {
+    alertsEnabled = false;
+    updateNotificationButton();
+    if (showFeedback) {
+      showNotificationToast(
+        "Notifications indisponibles",
+        "Ce navigateur ne prend pas en charge les notifications."
+      );
+    }
+    return false;
+  }
+
+  const permission =
+    Notification.permission === "default"
+      ? await Notification.requestPermission()
+      : Notification.permission;
+  if (permission !== "granted") {
+    alertsEnabled = false;
+    localStorage.removeItem("tchateliaAlerts");
+    updateNotificationButton();
+    if (showFeedback) {
+      showNotificationToast(
+        "Autorisation refusee",
+        "Tu peux modifier ce choix dans les reglages du navigateur."
+      );
+    }
+    return false;
+  }
+
+  alertsEnabled = true;
+  localStorage.setItem("tchateliaAlerts", "enabled");
+  ensureAudioContext();
+  updateNotificationButton();
+  if (showFeedback) {
+    showNotificationToast(
+      "Alertes activees",
+      "Les mentions et messages prives seront signales."
+    );
+  }
+  return true;
 }
 
 function updateDocumentTitle() {
