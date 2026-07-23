@@ -114,15 +114,10 @@ Pour une premiere mise en ligne gratuite :
 Important : utiliser `npm install`, pas `npm ci`, car Render doit installer la
 dependance PostgreSQL `pg` a partir de `package.json`.
 
-## Informations legales a completer
+## Informations legales
 
-Avant d'ouvrir le site au public, remplacer dans `public/conditions.html` et
-`public/confidentialite.html` :
+Les pages indiquent Yonni CHOU comme editeur non professionnel et responsable du
+traitement. Le point de contact publie est `contact.voltvisuel@gmail.com`.
 
-```text
-{{NOM_COMPLET_OU_RAISON_SOCIALE}}
-{{ADRESSE_POSTALE}}
-```
-
-Ces pages sont une base pratique a adapter a la situation reelle du responsable
-du site.
+Ces pages sont une base pratique a adapter si le site devient professionnel,
+commercial ou change d'hebergeur.
