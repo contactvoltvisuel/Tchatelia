@@ -19,6 +19,7 @@ const adminRoomTopicForm = document.querySelector("#adminRoomTopicForm");
 const adminCurrentTopicInput = document.querySelector("#adminCurrentTopicInput");
 const adminDeleteRoomButton = document.querySelector("#adminDeleteRoomButton");
 const adminRefreshAccountsButton = document.querySelector("#adminRefreshAccountsButton");
+const adminAccountPanel = document.querySelector(".admin-account-panel");
 const adminAccountList = document.querySelector("#adminAccountList");
 const roomName = document.querySelector("#roomName");
 const roomTopic = document.querySelector("#roomTopic");
@@ -148,7 +149,7 @@ socket.on("users", (users) => {
   userList.innerHTML = "";
   users.forEach((user) => {
     const item = document.createElement("li");
-    item.textContent = user.role === "admin" ? `${user.nickname} admin` : user.nickname;
+    item.textContent = formatUserName(user);
     item.className = user.nickname === currentNickname ? "is-me" : "";
     userList.append(item);
   });
@@ -204,7 +205,10 @@ function showChat(response) {
 }
 
 function renderAdminPanel() {
-  if (currentRole !== "admin") {
+  const canModerate = currentRole === "admin" || currentRole === "moderator";
+  const canManage = currentRole === "admin";
+
+  if (!canModerate) {
     adminPanel.classList.add("hidden");
     adminUserList.innerHTML = "";
     adminAccountList.innerHTML = "";
@@ -213,23 +217,32 @@ function renderAdminPanel() {
 
   adminPanel.classList.remove("hidden");
   adminUserList.innerHTML = "";
+  adminRoomCreateForm.classList.toggle("hidden", !canManage);
+  adminRoomTopicForm.classList.toggle("hidden", !canManage);
+  adminDeleteRoomButton.classList.toggle("hidden", !canManage);
+  adminAccountPanel.classList.toggle("hidden", !canManage);
   adminDeleteRoomButton.disabled = currentRoom === "accueil";
-  socket.emit("account-action", {
-    action: "list",
-  });
+
+  if (canManage) {
+    socket.emit("account-action", {
+      action: "list",
+    });
+  } else {
+    adminAccountList.innerHTML = "";
+  }
 
   currentUsers.forEach((user) => {
     const row = document.createElement("div");
     row.className = "admin-user";
 
     const name = document.createElement("span");
-    name.textContent = user.role === "admin" ? `${user.nickname} admin` : user.nickname;
+    name.textContent = formatUserName(user);
     row.append(name);
 
     const actions = document.createElement("div");
     actions.className = "admin-actions";
 
-    if (user.nickname !== currentNickname && user.role !== "admin") {
+    if (user.nickname !== currentNickname && user.role !== "admin" && user.role !== "moderator") {
       actions.append(createAdminButton("Kick", "kick", user.nickname));
       actions.append(createAdminButton("Ban", "ban", user.nickname));
     }
@@ -266,6 +279,7 @@ function renderAccountPanel() {
     const roleSelect = document.createElement("select");
     roleSelect.innerHTML = `
       <option value="user">Utilisateur</option>
+      <option value="moderator">Moderateur</option>
       <option value="admin">Admin</option>
     `;
     roleSelect.value = account.role;
@@ -325,6 +339,12 @@ function createAdminButton(label, action, nickname) {
     });
   });
   return button;
+}
+
+function formatUserName(user) {
+  if (user.role === "admin") return `${user.nickname} admin`;
+  if (user.role === "moderator") return `${user.nickname} modo`;
+  return user.nickname;
 }
 
 function renderMessage(message) {

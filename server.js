@@ -45,6 +45,7 @@ const SPAM_WINDOW_MS = 10_000;
 const SPAM_MAX_MESSAGES = 5;
 const SPAM_COOLDOWN_MS = 15_000;
 const DUPLICATE_COOLDOWN_MS = 8_000;
+const MODERATION_ROLES = new Set(["admin", "moderator"]);
 
 await initDatabase();
 
@@ -177,10 +178,7 @@ io.on("connection", (socket) => {
     socket.join(cleanRoom);
     socket.emit("rooms", getRoomList());
     socket.emit("history", rooms.get(cleanRoom).history);
-    await sendSystem(
-      cleanRoom,
-      `${displayName}${role === "admin" ? " (admin)" : ""} vient d'entrer dans le salon.`
-    );
+    await sendSystem(cleanRoom, `${displayName}${formatRoleSuffix(role)} vient d'entrer dans le salon.`);
     publishUsers(cleanRoom);
     if (role === "admin") {
       await sendAccountList(socket);
@@ -240,6 +238,8 @@ io.on("connection", (socket) => {
         text:
           user.role === "admin"
             ? "Commandes admin : /me texte, /clear, /kick pseudo, /ban pseudo, /unban pseudo"
+            : user.role === "moderator"
+              ? "Commandes moderation : /me texte, /clear, /kick pseudo, /ban pseudo, /unban pseudo"
             : "Commandes : /me texte, /clear, /admin motdepasse",
         createdAt: Date.now(),
       });
@@ -431,7 +431,7 @@ async function handleAccountAction(socket, admin, action, rawNickname, rawRole, 
   }
 
   if (action === "role") {
-    const role = ["user", "admin"].includes(rawRole) ? rawRole : "user";
+    const role = ["user", "moderator", "admin"].includes(rawRole) ? rawRole : "user";
     await updateAccountRole(nickname, role);
     updateConnectedAccount(nickname, { role });
     io.emit("rooms", getRoomList());
@@ -567,7 +567,7 @@ function emitPrivateSystem(socket, text) {
 }
 
 function checkSpam(user, messageText) {
-  if (user.role === "admin") {
+  if (MODERATION_ROLES.has(user.role)) {
     return { ok: true };
   }
 
@@ -608,12 +608,12 @@ function checkSpam(user, messageText) {
 }
 
 async function handleModeration(socket, admin, action, rawTarget) {
-  if (admin.role !== "admin") {
+  if (!MODERATION_ROLES.has(admin.role)) {
     socket.emit("message", {
       id: crypto.randomUUID(),
       type: "system",
       nickname: "Systeme",
-      text: "Commande reservee aux admins.",
+      text: "Commande reservee aux moderateurs et admins.",
       createdAt: Date.now(),
     });
     return;
@@ -653,12 +653,12 @@ async function handleModeration(socket, admin, action, rawTarget) {
 
   const [targetSocketId, targetUser] = targetEntry;
 
-  if (targetUser.role === "admin") {
+  if (targetUser.role === "admin" || targetUser.role === "moderator") {
     socket.emit("message", {
       id: crypto.randomUUID(),
       type: "system",
       nickname: "Systeme",
-      text: "Un admin ne peut pas exclure un autre admin dans cette version.",
+      text: "Un moderateur/admin ne peut pas exclure un autre membre de l'equipe.",
       createdAt: Date.now(),
     });
     return;
@@ -707,6 +707,12 @@ function publishUsers(room) {
 
   io.to(room).emit("users", connected);
   io.emit("rooms", getRoomList());
+}
+
+function formatRoleSuffix(role) {
+  if (role === "admin") return " (admin)";
+  if (role === "moderator") return " (modo)";
+  return "";
 }
 
 function getRoomList() {

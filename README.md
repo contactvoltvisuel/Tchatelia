@@ -14,6 +14,7 @@ Prerequis : Node.js 24 ou plus recent.
 - Messages instantanes avec Socket.IO.
 - Liste des personnes connectees dans le salon.
 - Connexion admin avec mot de passe.
+- Role moderateur : kick, ban et unban sans acces a la gestion complete.
 - Commandes de moderation : `/kick pseudo`, `/ban pseudo`, `/unban pseudo`.
 - Panneau admin : kick, ban, unban, creation et suppression de salons.
 - Historique et bannissements sauvegardes en SQLite local ou PostgreSQL/Supabase.
@@ -104,8 +105,8 @@ dependance PostgreSQL `pg` a partir de `package.json`.
 
 ## Prochaine etape
 
-La prochaine version devrait renforcer les comptes et les roles :
+La prochaine version pourrait ajouter :
 
-- vrais roles `admin` et `moderateur`,
-- profils,
-- moderation plus fine avec role `moderateur`.
+- un journal des actions de moderation,
+- des profils utilisateurs,
+- des permissions plus fines par salon.
