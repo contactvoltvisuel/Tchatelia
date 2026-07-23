@@ -1,14 +1,18 @@
 import "./config.js";
 import express from "express";
 import { createServer } from "node:http";
+import { randomBytes, timingSafeEqual, scrypt as scryptCallback } from "node:crypto";
 import { existsSync } from "node:fs";
 import { dirname, join } from "node:path";
+import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
 import { Server } from "socket.io";
 import {
   banNickname,
+  createAccount,
   createRoom,
   deleteRoom,
+  getAccountByNickname,
   getDatabaseLabel,
   getRoomHistory,
   getRooms,
@@ -19,6 +23,8 @@ import {
   unbanNickname,
   updateRoomTopic,
 } from "./db.js";
+
+const scrypt = promisify(scryptCallback);
 
 const app = express();
 const httpServer = createServer(app);
@@ -60,11 +66,14 @@ app.get("/", (request, response) => {
 });
 
 io.on("connection", (socket) => {
-  socket.on("join", async ({ nickname, room, adminPassword }, callback) => {
+  socket.on("join", async ({ nickname, room, adminPassword, accountPassword, authMode }, callback) => {
     const cleanNickname = cleanName(nickname);
+    const normalizedNickname = normalizeName(cleanNickname);
     const cleanRoom = rooms.has(room) ? room : "accueil";
     const wantsAdmin = Boolean(String(adminPassword || "").trim());
     const isAdmin = String(adminPassword || "") === ADMIN_PASSWORD;
+    const cleanAuthMode = ["guest", "login", "register"].includes(authMode) ? authMode : "guest";
+    const cleanAccountPassword = String(accountPassword || "");
 
     if (wantsAdmin && !isAdmin) {
       callback?.({
@@ -74,7 +83,66 @@ io.on("connection", (socket) => {
       return;
     }
 
-    if (await isBanned(normalizeName(cleanNickname))) {
+    if (cleanAuthMode === "register") {
+      if (cleanAccountPassword.length < 6) {
+        callback?.({
+          ok: false,
+          error: "Le mot de passe du compte doit faire au moins 6 caracteres.",
+        });
+        return;
+      }
+
+      const existingAccount = await getAccountByNickname(normalizedNickname);
+      if (existingAccount) {
+        callback?.({
+          ok: false,
+          error: "Ce pseudo est deja reserve. Connecte-toi avec le mot de passe du compte.",
+        });
+        return;
+      }
+
+      const passwordRecord = await hashPassword(cleanAccountPassword);
+      await createAccount({
+        nickname: normalizedNickname,
+        displayName: cleanNickname,
+        passwordHash: passwordRecord.passwordHash,
+        salt: passwordRecord.salt,
+        role: isAdmin ? "admin" : "user",
+      });
+    }
+
+    const account = await getAccountByNickname(normalizedNickname);
+
+    if (account && cleanAuthMode !== "register") {
+      if (cleanAuthMode !== "login") {
+        callback?.({
+          ok: false,
+          error: "Ce pseudo est reserve. Utilise la connexion compte.",
+        });
+        return;
+      }
+
+      if (!(await verifyPassword(cleanAccountPassword, account))) {
+        callback?.({
+          ok: false,
+          error: "Mot de passe du compte incorrect.",
+        });
+        return;
+      }
+    }
+
+    if (!account && cleanAuthMode === "login") {
+      callback?.({
+        ok: false,
+        error: "Aucun compte n'existe avec ce pseudo.",
+      });
+      return;
+    }
+
+    const role = account?.role || (isAdmin ? "admin" : "user");
+    const displayName = account?.displayName || cleanNickname;
+
+    if (await isBanned(normalizedNickname)) {
       callback?.({
         ok: false,
         error: "Ce pseudo est banni du chat.",
@@ -83,9 +151,10 @@ io.on("connection", (socket) => {
     }
 
     users.set(socket.id, {
-      nickname: cleanNickname,
+      nickname: displayName,
       room: cleanRoom,
-      role: isAdmin ? "admin" : "user",
+      role,
+      account: Boolean(account || cleanAuthMode === "register"),
       messageTimes: [],
       lastMessage: "",
       cooldownUntil: 0,
@@ -97,15 +166,15 @@ io.on("connection", (socket) => {
     socket.emit("history", rooms.get(cleanRoom).history);
     await sendSystem(
       cleanRoom,
-      `${cleanNickname}${isAdmin ? " (admin)" : ""} vient d'entrer dans le salon.`
+      `${displayName}${role === "admin" ? " (admin)" : ""} vient d'entrer dans le salon.`
     );
     publishUsers(cleanRoom);
 
     callback?.({
       ok: true,
-      nickname: cleanNickname,
+      nickname: displayName,
       room: cleanRoom,
-      role: isAdmin ? "admin" : "user",
+      role,
       topic: rooms.get(cleanRoom).topic,
     });
   });
@@ -275,6 +344,23 @@ function cleanName(value) {
 
 function normalizeName(value) {
   return String(value || "").trim().toLocaleLowerCase("fr-FR");
+}
+
+async function hashPassword(password) {
+  const salt = randomBytes(16).toString("hex");
+  const derivedKey = await scrypt(password, salt, 64);
+
+  return {
+    salt,
+    passwordHash: derivedKey.toString("hex"),
+  };
+}
+
+async function verifyPassword(password, account) {
+  const derivedKey = await scrypt(password, account.salt, 64);
+  const storedHash = Buffer.from(account.passwordHash, "hex");
+
+  return storedHash.length === derivedKey.length && timingSafeEqual(storedHash, derivedKey);
 }
 
 function findUserByNickname(nickname) {

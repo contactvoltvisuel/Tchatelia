@@ -38,6 +38,8 @@ loginForm.addEventListener("submit", (event) => {
       nickname: currentNickname,
       room: data.get("room"),
       adminPassword: data.get("adminPassword"),
+      accountPassword: data.get("accountPassword"),
+      authMode: data.get("authMode"),
     },
     (response) => {
       if (!response.ok) {

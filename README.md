@@ -7,6 +7,8 @@ Prerequis : Node.js 24 ou plus recent.
 ## Ce que fait cette premiere version
 
 - Pseudo libre, sans inscription.
+- Comptes utilisateurs avec pseudo reserve et mot de passe.
+- Connexion invitee toujours disponible pour les pseudos non reserves.
 - Salons publics : `#accueil`, `#aide`, `#musique`, `#rencontres`.
 - Messages instantanes avec Socket.IO.
 - Liste des personnes connectees dans le salon.
@@ -58,6 +60,10 @@ Pour changer ce mot de passe, copier `.env.example` en `.env`, puis remplacer :
 ADMIN_PASSWORD=change-moi
 ```
 
+Un compte cree en mode `Inscription` avec le bon mot de passe admin devient un
+compte admin sauvegarde. Ensuite, il suffit de se connecter en mode `Connexion`
+avec le pseudo et le mot de passe du compte.
+
 Pour utiliser Supabase ou PostgreSQL, ajouter aussi :
 
 ```text
@@ -99,7 +105,6 @@ dependance PostgreSQL `pg` a partir de `package.json`.
 
 La prochaine version devrait renforcer les comptes et les roles :
 
-- comptes utilisateurs,
 - vrais roles `admin` et `moderateur`,
 - profils,
-- connexion par mot de passe.
+- page de gestion des comptes.

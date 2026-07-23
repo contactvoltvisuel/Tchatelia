@@ -37,6 +37,15 @@ export async function initDatabase() {
       banned_by TEXT NOT NULL,
       created_at BIGINT NOT NULL
     );
+
+    CREATE TABLE IF NOT EXISTS accounts (
+      nickname TEXT PRIMARY KEY,
+      display_name TEXT NOT NULL,
+      password_hash TEXT NOT NULL,
+      salt TEXT NOT NULL,
+      role TEXT NOT NULL,
+      created_at BIGINT NOT NULL
+    );
   `);
 
   for (const [name, topic] of defaultRooms) {
@@ -58,6 +67,35 @@ export function getDatabaseLabel() {
 export async function getRooms() {
   const result = await pool.query("SELECT name, topic FROM rooms ORDER BY created_at ASC");
   return result.rows;
+}
+
+export async function getAccountByNickname(nickname) {
+  const result = await pool.query(
+    `
+      SELECT nickname, display_name AS "displayName", password_hash AS "passwordHash", salt, role
+      FROM accounts
+      WHERE nickname = $1
+    `,
+    [nickname]
+  );
+  return result.rows[0];
+}
+
+export async function createAccount(account) {
+  await pool.query(
+    `
+      INSERT INTO accounts (nickname, display_name, password_hash, salt, role, created_at)
+      VALUES ($1, $2, $3, $4, $5, $6)
+    `,
+    [
+      account.nickname,
+      account.displayName,
+      account.passwordHash,
+      account.salt,
+      account.role,
+      Date.now(),
+    ]
+  );
 }
 
 export async function createRoom(name, topic) {

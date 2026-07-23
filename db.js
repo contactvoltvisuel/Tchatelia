@@ -7,7 +7,9 @@ const database = process.env.DATABASE_URL
 export const {
   banNickname,
   createRoom,
+  createAccount,
   deleteRoom,
+  getAccountByNickname,
   getDatabaseLabel,
   getRoomHistory,
   getRooms,

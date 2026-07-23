@@ -109,6 +109,29 @@ p {
   font-weight: 700;
 }
 
+.auth-mode {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+}
+
+.auth-mode label {
+  min-height: 38px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #fff;
+  color: var(--ink);
+}
+
+.auth-mode input {
+  width: auto;
+  min-height: auto;
+}
+
 input,
 select {
   width: 100%;

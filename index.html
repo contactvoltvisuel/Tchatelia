@@ -19,6 +19,21 @@
         </div>
 
         <form class="login-form" id="loginForm">
+          <div class="auth-mode">
+            <label>
+              <input type="radio" name="authMode" value="guest" checked />
+              Invite
+            </label>
+            <label>
+              <input type="radio" name="authMode" value="login" />
+              Connexion
+            </label>
+            <label>
+              <input type="radio" name="authMode" value="register" />
+              Inscription
+            </label>
+          </div>
+
           <label for="nickname">Pseudo</label>
           <input
             id="nickname"
@@ -27,6 +42,15 @@
             autocomplete="nickname"
             placeholder="TonPseudo"
             required
+          />
+
+          <label for="accountPassword">Mot de passe du compte</label>
+          <input
+            id="accountPassword"
+            name="accountPassword"
+            type="password"
+            autocomplete="current-password"
+            placeholder="Connexion ou inscription"
           />
 
           <label for="room">Salon</label>
