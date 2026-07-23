@@ -18,9 +18,13 @@ import {
   getRooms,
   initDatabase,
   isBanned,
+  listAccounts,
   saveMessage,
+  setAccountActive,
   trimRoomHistory,
   unbanNickname,
+  updateAccountPassword,
+  updateAccountRole,
   updateRoomTopic,
 } from "./db.js";
 
@@ -114,6 +118,14 @@ io.on("connection", (socket) => {
     const account = await getAccountByNickname(normalizedNickname);
 
     if (account && cleanAuthMode !== "register") {
+      if (!account.active) {
+        callback?.({
+          ok: false,
+          error: "Ce compte est desactive.",
+        });
+        return;
+      }
+
       if (cleanAuthMode !== "login") {
         callback?.({
           ok: false,
@@ -155,6 +167,7 @@ io.on("connection", (socket) => {
       room: cleanRoom,
       role,
       account: Boolean(account || cleanAuthMode === "register"),
+      accountNickname: account || cleanAuthMode === "register" ? normalizedNickname : null,
       messageTimes: [],
       lastMessage: "",
       cooldownUntil: 0,
@@ -169,6 +182,9 @@ io.on("connection", (socket) => {
       `${displayName}${role === "admin" ? " (admin)" : ""} vient d'entrer dans le salon.`
     );
     publishUsers(cleanRoom);
+    if (role === "admin") {
+      await sendAccountList(socket);
+    }
 
     callback?.({
       ok: true,
@@ -323,6 +339,16 @@ io.on("connection", (socket) => {
     await handleRoomAction(socket, user, action, name, topic);
   });
 
+  socket.on("account-action", async ({ action, nickname, role, password }) => {
+    const user = users.get(socket.id);
+    if (!user || user.role !== "admin") {
+      emitPrivateSystem(socket, "Gestion des comptes reservee aux admins.");
+      return;
+    }
+
+    await handleAccountAction(socket, user, action, nickname, role, password);
+  });
+
   socket.on("disconnect", async () => {
     const user = users.get(socket.id);
     if (!user) return;
@@ -379,6 +405,83 @@ function cleanRoomName(value) {
 
 function cleanTopic(value) {
   return String(value || "Salon public Tchatelia.").trim().slice(0, 90);
+}
+
+async function sendAccountList(socket) {
+  const accounts = await listAccounts();
+  socket.emit("accounts", accounts);
+}
+
+async function handleAccountAction(socket, admin, action, rawNickname, rawRole, rawPassword) {
+  if (action === "list") {
+    await sendAccountList(socket);
+    return;
+  }
+
+  const nickname = normalizeName(rawNickname);
+  if (!nickname) {
+    emitPrivateSystem(socket, "Indique un compte valide.");
+    return;
+  }
+
+  const account = await getAccountByNickname(nickname);
+  if (!account) {
+    emitPrivateSystem(socket, "Compte introuvable.");
+    return;
+  }
+
+  if (action === "role") {
+    const role = ["user", "admin"].includes(rawRole) ? rawRole : "user";
+    await updateAccountRole(nickname, role);
+    updateConnectedAccount(nickname, { role });
+    io.emit("rooms", getRoomList());
+    for (const room of rooms.keys()) publishUsers(room);
+    emitPrivateSystem(socket, `Role de ${account.displayName} mis a jour : ${role}.`);
+    await sendAccountList(socket);
+    return;
+  }
+
+  if (action === "active") {
+    const active = Boolean(rawRole);
+
+    if (admin.accountNickname === nickname && !active) {
+      emitPrivateSystem(socket, "Tu ne peux pas desactiver ton propre compte.");
+      return;
+    }
+
+    await setAccountActive(nickname, active);
+    if (!active) disconnectAccount(nickname, "Ton compte a ete desactive.");
+    emitPrivateSystem(socket, `${account.displayName} est maintenant ${active ? "actif" : "desactive"}.`);
+    await sendAccountList(socket);
+    return;
+  }
+
+  if (action === "password") {
+    const password = String(rawPassword || "");
+    if (password.length < 6) {
+      emitPrivateSystem(socket, "Le nouveau mot de passe doit faire au moins 6 caracteres.");
+      return;
+    }
+
+    await updateAccountPassword(nickname, await hashPassword(password));
+    emitPrivateSystem(socket, `Mot de passe de ${account.displayName} reinitialise.`);
+    await sendAccountList(socket);
+  }
+}
+
+function updateConnectedAccount(accountNickname, changes) {
+  for (const user of users.values()) {
+    if (user.accountNickname !== accountNickname) continue;
+    Object.assign(user, changes);
+  }
+}
+
+function disconnectAccount(accountNickname, reason) {
+  for (const [socketId, user] of users.entries()) {
+    if (user.accountNickname !== accountNickname) continue;
+    io.to(socketId).emit("moderated", { reason });
+    io.sockets.sockets.get(socketId)?.disconnect(true);
+  }
 }
 
 async function handleRoomAction(socket, admin, action, rawName, rawTopic) {

@@ -44,9 +44,12 @@ export async function initDatabase() {
       password_hash TEXT NOT NULL,
       salt TEXT NOT NULL,
       role TEXT NOT NULL,
+      active BOOLEAN NOT NULL DEFAULT TRUE,
       created_at BIGINT NOT NULL
     );
   `);
+
+  await pool.query("ALTER TABLE accounts ADD COLUMN IF NOT EXISTS active BOOLEAN NOT NULL DEFAULT TRUE");
 
   for (const [name, topic] of defaultRooms) {
     await pool.query(
@@ -72,7 +75,7 @@ export async function getRooms() {
 export async function getAccountByNickname(nickname) {
   const result = await pool.query(
     `
-      SELECT nickname, display_name AS "displayName", password_hash AS "passwordHash", salt, role
+      SELECT nickname, display_name AS "displayName", password_hash AS "passwordHash", salt, role, active
       FROM accounts
       WHERE nickname = $1
     `,
@@ -81,11 +84,20 @@ export async function getAccountByNickname(nickname) {
   return result.rows[0];
 }
 
+export async function listAccounts() {
+  const result = await pool.query(`
+    SELECT nickname, display_name AS "displayName", role, active, created_at AS "createdAt"
+    FROM accounts
+    ORDER BY created_at DESC
+  `);
+  return result.rows;
+}
+
 export async function createAccount(account) {
   await pool.query(
     `
-      INSERT INTO accounts (nickname, display_name, password_hash, salt, role, created_at)
-      VALUES ($1, $2, $3, $4, $5, $6)
+      INSERT INTO accounts (nickname, display_name, password_hash, salt, role, active, created_at)
+      VALUES ($1, $2, $3, $4, $5, TRUE, $6)
     `,
     [
       account.nickname,
@@ -96,6 +108,22 @@ export async function createAccount(account) {
       Date.now(),
     ]
   );
+}
+
+export async function updateAccountRole(nickname, role) {
+  await pool.query("UPDATE accounts SET role = $1 WHERE nickname = $2", [role, nickname]);
+}
+
+export async function setAccountActive(nickname, active) {
+  await pool.query("UPDATE accounts SET active = $1 WHERE nickname = $2", [active, nickname]);
+}
+
+export async function updateAccountPassword(nickname, passwordRecord) {
+  await pool.query("UPDATE accounts SET password_hash = $1, salt = $2 WHERE nickname = $3", [
+    passwordRecord.passwordHash,
+    passwordRecord.salt,
+    nickname,
+  ]);
 }
 
 export async function createRoom(name, topic) {

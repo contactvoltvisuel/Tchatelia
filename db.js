@@ -10,6 +10,7 @@ export const {
   createAccount,
   deleteRoom,
   getAccountByNickname,
+  listAccounts,
   getDatabaseLabel,
   getRoomHistory,
   getRooms,
@@ -18,5 +19,8 @@ export const {
   saveMessage,
   trimRoomHistory,
   unbanNickname,
+  setAccountActive,
+  updateAccountPassword,
+  updateAccountRole,
   updateRoomTopic,
 } = database;

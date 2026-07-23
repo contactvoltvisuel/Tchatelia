@@ -9,6 +9,7 @@ Prerequis : Node.js 24 ou plus recent.
 - Pseudo libre, sans inscription.
 - Comptes utilisateurs avec pseudo reserve et mot de passe.
 - Connexion invitee toujours disponible pour les pseudos non reserves.
+- Gestion admin des comptes : role, activation et reinitialisation de mot de passe.
 - Salons publics : `#accueil`, `#aide`, `#musique`, `#rencontres`.
 - Messages instantanes avec Socket.IO.
 - Liste des personnes connectees dans le salon.
@@ -107,4 +108,4 @@ La prochaine version devrait renforcer les comptes et les roles :
 
 - vrais roles `admin` et `moderateur`,
 - profils,
-- page de gestion des comptes.
+- moderation plus fine avec role `moderateur`.

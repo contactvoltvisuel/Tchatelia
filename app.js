@@ -18,6 +18,8 @@ const adminRoomTopicInput = document.querySelector("#adminRoomTopicInput");
 const adminRoomTopicForm = document.querySelector("#adminRoomTopicForm");
 const adminCurrentTopicInput = document.querySelector("#adminCurrentTopicInput");
 const adminDeleteRoomButton = document.querySelector("#adminDeleteRoomButton");
+const adminRefreshAccountsButton = document.querySelector("#adminRefreshAccountsButton");
+const adminAccountList = document.querySelector("#adminAccountList");
 const roomName = document.querySelector("#roomName");
 const roomTopic = document.querySelector("#roomTopic");
 const leaveButton = document.querySelector("#leaveButton");
@@ -26,6 +28,7 @@ let currentRoom = "accueil";
 let currentNickname = "";
 let currentRole = "user";
 let currentUsers = [];
+let currentAccounts = [];
 
 loginForm.addEventListener("submit", (event) => {
   event.preventDefault();
@@ -120,6 +123,12 @@ adminDeleteRoomButton.addEventListener("click", () => {
   });
 });
 
+adminRefreshAccountsButton.addEventListener("click", () => {
+  socket.emit("account-action", {
+    action: "list",
+  });
+});
+
 socket.on("history", (history) => {
   messages.innerHTML = "";
   history.forEach(renderMessage);
@@ -172,6 +181,11 @@ socket.on("room-updated", ({ room, topic }) => {
   renderAdminPanel();
 });
 
+socket.on("accounts", (accounts) => {
+  currentAccounts = accounts;
+  renderAccountPanel();
+});
+
 function switchRoom(room) {
   socket.emit("switch-room", room, (response) => {
     currentRoom = response.room;
@@ -193,12 +207,16 @@ function renderAdminPanel() {
   if (currentRole !== "admin") {
     adminPanel.classList.add("hidden");
     adminUserList.innerHTML = "";
+    adminAccountList.innerHTML = "";
     return;
   }
 
   adminPanel.classList.remove("hidden");
   adminUserList.innerHTML = "";
   adminDeleteRoomButton.disabled = currentRoom === "accueil";
+  socket.emit("account-action", {
+    action: "list",
+  });
 
   currentUsers.forEach((user) => {
     const row = document.createElement("div");
@@ -218,6 +236,81 @@ function renderAdminPanel() {
 
     row.append(actions);
     adminUserList.append(row);
+  });
+
+  renderAccountPanel();
+}
+
+function renderAccountPanel() {
+  if (currentRole !== "admin") return;
+
+  adminAccountList.innerHTML = "";
+
+  if (!currentAccounts.length) {
+    const empty = document.createElement("p");
+    empty.className = "admin-empty";
+    empty.textContent = "Aucun compte inscrit.";
+    adminAccountList.append(empty);
+    return;
+  }
+
+  currentAccounts.forEach((account) => {
+    const row = document.createElement("div");
+    row.className = account.active ? "admin-account" : "admin-account is-disabled";
+
+    const title = document.createElement("div");
+    title.className = "admin-account-title";
+    title.innerHTML = `<strong>${escapeHtml(account.displayName)}</strong><small>${account.role}${account.active ? "" : " desactive"}</small>`;
+    row.append(title);
+
+    const roleSelect = document.createElement("select");
+    roleSelect.innerHTML = `
+      <option value="user">Utilisateur</option>
+      <option value="admin">Admin</option>
+    `;
+    roleSelect.value = account.role;
+    roleSelect.addEventListener("change", () => {
+      socket.emit("account-action", {
+        action: "role",
+        nickname: account.nickname,
+        role: roleSelect.value,
+      });
+    });
+    row.append(roleSelect);
+
+    const actions = document.createElement("div");
+    actions.className = "admin-account-actions";
+
+    const activeButton = document.createElement("button");
+    activeButton.type = "button";
+    activeButton.textContent = account.active ? "Desactiver" : "Reactiver";
+    activeButton.className = account.active ? "danger-button" : "";
+    activeButton.addEventListener("click", () => {
+      socket.emit("account-action", {
+        action: "active",
+        nickname: account.nickname,
+        role: !account.active,
+      });
+    });
+    actions.append(activeButton);
+
+    const passwordButton = document.createElement("button");
+    passwordButton.type = "button";
+    passwordButton.textContent = "Nouveau mdp";
+    passwordButton.addEventListener("click", () => {
+      const password = prompt(`Nouveau mot de passe pour ${account.displayName}`);
+      if (!password) return;
+
+      socket.emit("account-action", {
+        action: "password",
+        nickname: account.nickname,
+        password,
+      });
+    });
+    actions.append(passwordButton);
+
+    row.append(actions);
+    adminAccountList.append(row);
   });
 }
 

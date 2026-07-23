@@ -49,9 +49,16 @@ export async function initDatabase() {
       password_hash TEXT NOT NULL,
       salt TEXT NOT NULL,
       role TEXT NOT NULL,
+      active INTEGER NOT NULL DEFAULT 1,
       created_at INTEGER NOT NULL
     );
   `);
+
+  try {
+    db.exec("ALTER TABLE accounts ADD COLUMN active INTEGER NOT NULL DEFAULT 1");
+  } catch (error) {
+    if (!String(error.message).includes("duplicate column")) throw error;
+  }
 
   const insertRoom = db.prepare(`
     INSERT OR IGNORE INTO rooms (name, topic, created_at)
@@ -74,24 +81,51 @@ export async function getRooms() {
 export async function getAccountByNickname(nickname) {
   return db
     .prepare(`
-      SELECT nickname, display_name AS displayName, password_hash AS passwordHash, salt, role
+      SELECT nickname, display_name AS displayName, password_hash AS passwordHash, salt, role, active
       FROM accounts
       WHERE nickname = ?
     `)
     .get(nickname);
 }
 
+export async function listAccounts() {
+  return db
+    .prepare(`
+      SELECT nickname, display_name AS displayName, role, active, created_at AS createdAt
+      FROM accounts
+      ORDER BY created_at DESC
+    `)
+    .all();
+}
+
 export async function createAccount(account) {
   db.prepare(`
-    INSERT INTO accounts (nickname, display_name, password_hash, salt, role, created_at)
-    VALUES (?, ?, ?, ?, ?, ?)
+    INSERT INTO accounts (nickname, display_name, password_hash, salt, role, active, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
   `).run(
     account.nickname,
     account.displayName,
     account.passwordHash,
     account.salt,
     account.role,
+    1,
     Date.now()
+  );
+}
+
+export async function updateAccountRole(nickname, role) {
+  db.prepare("UPDATE accounts SET role = ? WHERE nickname = ?").run(role, nickname);
+}
+
+export async function setAccountActive(nickname, active) {
+  db.prepare("UPDATE accounts SET active = ? WHERE nickname = ?").run(active ? 1 : 0, nickname);
+}
+
+export async function updateAccountPassword(nickname, passwordRecord) {
+  db.prepare("UPDATE accounts SET password_hash = ?, salt = ? WHERE nickname = ?").run(
+    passwordRecord.passwordHash,
+    passwordRecord.salt,
+    nickname
   );
 }
 
