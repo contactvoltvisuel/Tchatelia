@@ -12,6 +12,12 @@ const adminPanel = document.querySelector("#adminPanel");
 const adminUserList = document.querySelector("#adminUserList");
 const adminUnbanForm = document.querySelector("#adminUnbanForm");
 const adminUnbanInput = document.querySelector("#adminUnbanInput");
+const adminRoomCreateForm = document.querySelector("#adminRoomCreateForm");
+const adminRoomNameInput = document.querySelector("#adminRoomNameInput");
+const adminRoomTopicInput = document.querySelector("#adminRoomTopicInput");
+const adminRoomTopicForm = document.querySelector("#adminRoomTopicForm");
+const adminCurrentTopicInput = document.querySelector("#adminCurrentTopicInput");
+const adminDeleteRoomButton = document.querySelector("#adminDeleteRoomButton");
 const roomName = document.querySelector("#roomName");
 const roomTopic = document.querySelector("#roomTopic");
 const leaveButton = document.querySelector("#leaveButton");
@@ -70,6 +76,48 @@ adminUnbanForm.addEventListener("submit", (event) => {
   adminUnbanInput.value = "";
 });
 
+adminRoomCreateForm.addEventListener("submit", (event) => {
+  event.preventDefault();
+  const name = adminRoomNameInput.value.trim();
+  const topic = adminRoomTopicInput.value.trim();
+  if (!name) return;
+
+  socket.emit("room-action", {
+    action: "create",
+    name,
+    topic,
+  });
+  adminRoomNameInput.value = "";
+  adminRoomTopicInput.value = "";
+});
+
+adminRoomTopicForm.addEventListener("submit", (event) => {
+  event.preventDefault();
+  const topic = adminCurrentTopicInput.value.trim();
+  if (!topic) return;
+
+  socket.emit("room-action", {
+    action: "topic",
+    name: currentRoom,
+    topic,
+  });
+  adminCurrentTopicInput.value = "";
+});
+
+adminDeleteRoomButton.addEventListener("click", () => {
+  if (currentRoom === "accueil") {
+    alert("Le salon #accueil ne peut pas etre supprime.");
+    return;
+  }
+
+  if (!confirm(`Supprimer le salon #${currentRoom} ?`)) return;
+
+  socket.emit("room-action", {
+    action: "delete",
+    name: currentRoom,
+  });
+});
+
 socket.on("history", (history) => {
   messages.innerHTML = "";
   history.forEach(renderMessage);
@@ -115,6 +163,13 @@ socket.on("rooms", (rooms) => {
   });
 });
 
+socket.on("room-updated", ({ room, topic }) => {
+  currentRoom = room;
+  roomName.textContent = `#${room}`;
+  roomTopic.textContent = topic;
+  renderAdminPanel();
+});
+
 function switchRoom(room) {
   socket.emit("switch-room", room, (response) => {
     currentRoom = response.room;
@@ -141,6 +196,7 @@ function renderAdminPanel() {
 
   adminPanel.classList.remove("hidden");
   adminUserList.innerHTML = "";
+  adminDeleteRoomButton.disabled = currentRoom === "accueil";
 
   currentUsers.forEach((user) => {
     const row = document.createElement("div");

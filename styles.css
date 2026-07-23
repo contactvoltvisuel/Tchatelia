@@ -274,14 +274,36 @@ button:hover {
   background: #9f4320;
 }
 
-.admin-unban-form {
+.admin-unban-form,
+.admin-room-form {
   display: grid;
   gap: 8px;
 }
 
-.admin-unban-form input {
+.admin-unban-form input,
+.admin-room-form input {
   min-height: 38px;
   font-size: 13px;
+}
+
+.admin-room-form {
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
+}
+
+.danger-button {
+  min-height: 38px;
+  background: var(--warm);
+  font-size: 13px;
+}
+
+.danger-button:hover {
+  background: #9f4320;
+}
+
+.danger-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
 }
 
 .conversation {

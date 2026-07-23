@@ -7,6 +7,8 @@ import { fileURLToPath } from "node:url";
 import { Server } from "socket.io";
 import {
   banNickname,
+  createRoom,
+  deleteRoom,
   getDatabaseLabel,
   getRoomHistory,
   getRooms,
@@ -15,6 +17,7 @@ import {
   saveMessage,
   trimRoomHistory,
   unbanNickname,
+  updateRoomTopic,
 } from "./db.js";
 
 const app = express();
@@ -235,6 +238,22 @@ io.on("connection", (socket) => {
     await handleModeration(socket, user, action, nickname);
   });
 
+  socket.on("room-action", async ({ action, name, topic }) => {
+    const user = users.get(socket.id);
+    if (!user || user.role !== "admin") {
+      socket.emit("message", {
+        id: crypto.randomUUID(),
+        type: "system",
+        nickname: "Systeme",
+        text: "Gestion des salons reservee aux admins.",
+        createdAt: Date.now(),
+      });
+      return;
+    }
+
+    await handleRoomAction(socket, user, action, name, topic);
+  });
+
   socket.on("disconnect", async () => {
     const user = users.get(socket.id);
     if (!user) return;
@@ -261,6 +280,101 @@ function normalizeName(value) {
 function findUserByNickname(nickname) {
   const normalized = normalizeName(nickname);
   return [...users.entries()].find(([, user]) => normalizeName(user.nickname) === normalized);
+}
+
+function cleanRoomName(value) {
+  return String(value || "")
+    .trim()
+    .toLocaleLowerCase("fr-FR")
+    .replace(/^#/, "")
+    .replace(/[^a-z0-9_-]/g, "")
+    .slice(0, 24);
+}
+
+function cleanTopic(value) {
+  return String(value || "Salon public Tchatelia.").trim().slice(0, 90);
+}
+
+async function handleRoomAction(socket, admin, action, rawName, rawTopic) {
+  const name = cleanRoomName(rawName);
+  const topic = cleanTopic(rawTopic);
+
+  if (!name) {
+    emitPrivateSystem(socket, "Indique un nom de salon valide.");
+    return;
+  }
+
+  if (action === "create") {
+    if (rooms.has(name)) {
+      emitPrivateSystem(socket, `Le salon #${name} existe deja.`);
+      return;
+    }
+
+    await createRoom(name, topic);
+    rooms.set(name, {
+      topic,
+      history: [],
+    });
+    io.emit("rooms", getRoomList());
+    await sendSystem(admin.room, `${admin.nickname} a cree le salon #${name}.`);
+    return;
+  }
+
+  if (!rooms.has(name)) {
+    emitPrivateSystem(socket, `Le salon #${name} n'existe pas.`);
+    return;
+  }
+
+  if (action === "topic") {
+    await updateRoomTopic(name, topic);
+    rooms.get(name).topic = topic;
+    io.emit("rooms", getRoomList());
+    io.to(name).emit("room-updated", {
+      room: name,
+      topic,
+    });
+    await sendSystem(name, `Sujet du salon mis a jour : ${topic}`);
+    return;
+  }
+
+  if (action === "delete") {
+    if (name === "accueil") {
+      emitPrivateSystem(socket, "Le salon #accueil ne peut pas etre supprime.");
+      return;
+    }
+
+    await deleteRoom(name);
+    rooms.delete(name);
+
+    for (const [socketId, user] of users.entries()) {
+      if (user.room !== name) continue;
+
+      const targetSocket = io.sockets.sockets.get(socketId);
+      targetSocket?.leave(name);
+      user.room = "accueil";
+      targetSocket?.join("accueil");
+      targetSocket?.emit("history", rooms.get("accueil").history);
+      targetSocket?.emit("room-updated", {
+        room: "accueil",
+        topic: rooms.get("accueil").topic,
+      });
+      await sendSystem("accueil", `${user.nickname} a ete deplace vers #accueil.`);
+    }
+
+    io.emit("rooms", getRoomList());
+    publishUsers("accueil");
+    await sendSystem("accueil", `${admin.nickname} a supprime le salon #${name}.`);
+  }
+}
+
+function emitPrivateSystem(socket, text) {
+  socket.emit("message", {
+    id: crypto.randomUUID(),
+    type: "system",
+    nickname: "Systeme",
+    text,
+    createdAt: Date.now(),
+  });
 }
 
 function checkSpam(user, messageText) {

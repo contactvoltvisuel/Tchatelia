@@ -62,6 +62,22 @@ export async function getRooms() {
   return db.prepare("SELECT name, topic FROM rooms ORDER BY created_at ASC").all();
 }
 
+export async function createRoom(name, topic) {
+  db.prepare(`
+    INSERT INTO rooms (name, topic, created_at)
+    VALUES (?, ?, ?)
+  `).run(name, topic, Date.now());
+}
+
+export async function updateRoomTopic(name, topic) {
+  db.prepare("UPDATE rooms SET topic = ? WHERE name = ?").run(topic, name);
+}
+
+export async function deleteRoom(name) {
+  db.prepare("DELETE FROM messages WHERE room = ?").run(name);
+  db.prepare("DELETE FROM rooms WHERE name = ?").run(name);
+}
+
 export async function getRoomHistory(room, limit = 80) {
   return db
     .prepare(`

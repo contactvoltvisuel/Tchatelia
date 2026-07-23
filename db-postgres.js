@@ -60,6 +60,22 @@ export async function getRooms() {
   return result.rows;
 }
 
+export async function createRoom(name, topic) {
+  await pool.query(
+    "INSERT INTO rooms (name, topic, created_at) VALUES ($1, $2, $3)",
+    [name, topic, Date.now()]
+  );
+}
+
+export async function updateRoomTopic(name, topic) {
+  await pool.query("UPDATE rooms SET topic = $1 WHERE name = $2", [topic, name]);
+}
+
+export async function deleteRoom(name) {
+  await pool.query("DELETE FROM messages WHERE room = $1", [name]);
+  await pool.query("DELETE FROM rooms WHERE name = $1", [name]);
+}
+
 export async function getRoomHistory(room, limit = 80) {
   const result = await pool.query(
     `

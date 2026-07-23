@@ -12,6 +12,7 @@ Prerequis : Node.js 24 ou plus recent.
 - Liste des personnes connectees dans le salon.
 - Connexion admin avec mot de passe.
 - Commandes de moderation : `/kick pseudo`, `/ban pseudo`, `/unban pseudo`.
+- Panneau admin : kick, ban, unban, creation et suppression de salons.
 - Historique et bannissements sauvegardes en SQLite local ou PostgreSQL/Supabase.
 - Anti-spam simple : limite les rafales et les messages identiques repetes.
 - Commandes simples : `/me texte`, `/clear` et `/help`.
@@ -96,10 +97,9 @@ dependance PostgreSQL `pg` a partir de `package.json`.
 
 ## Prochaine etape
 
-La prochaine version devrait finaliser la mise en ligne :
+La prochaine version devrait renforcer les comptes et les roles :
 
-- depot GitHub,
-- service Render,
-- projet Supabase,
 - comptes utilisateurs,
-- vrais roles `admin` et `moderateur`.
+- vrais roles `admin` et `moderateur`,
+- profils,
+- connexion par mot de passe.

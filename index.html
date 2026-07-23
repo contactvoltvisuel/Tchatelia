@@ -76,6 +76,33 @@
               />
               <button type="submit">Unban</button>
             </form>
+            <form class="admin-room-form" id="adminRoomCreateForm">
+              <input
+                id="adminRoomNameInput"
+                maxlength="24"
+                autocomplete="off"
+                placeholder="Nouveau salon"
+              />
+              <input
+                id="adminRoomTopicInput"
+                maxlength="90"
+                autocomplete="off"
+                placeholder="Sujet du salon"
+              />
+              <button type="submit">Creer salon</button>
+            </form>
+            <form class="admin-room-form" id="adminRoomTopicForm">
+              <input
+                id="adminCurrentTopicInput"
+                maxlength="90"
+                autocomplete="off"
+                placeholder="Nouveau sujet du salon actuel"
+              />
+              <button type="submit">Modifier sujet</button>
+            </form>
+            <button class="danger-button" id="adminDeleteRoomButton" type="button">
+              Supprimer ce salon
+            </button>
           </div>
         </aside>
 
