@@ -1,6 +1,9 @@
 import "./config.js";
 import express from "express";
 import { createServer } from "node:http";
+import { existsSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { Server } from "socket.io";
 import {
   banNickname,
@@ -17,6 +20,10 @@ import {
 const app = express();
 const httpServer = createServer(app);
 const io = new Server(httpServer);
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const publicDir = join(__dirname, "public");
+const publicIndex = join(publicDir, "index.html");
+const rootIndex = join(__dirname, "index.html");
 
 const PORT = process.env.PORT || 3000;
 const MAX_HISTORY = 80;
@@ -38,7 +45,12 @@ const rooms = new Map(
 
 const users = new Map();
 
-app.use(express.static("public"));
+app.use(express.static(publicDir));
+app.use(express.static(__dirname));
+
+app.get("/", (request, response) => {
+  response.sendFile(existsSync(publicIndex) ? publicIndex : rootIndex);
+});
 
 io.on("connection", (socket) => {
   socket.on("join", async ({ nickname, room, adminPassword }, callback) => {
