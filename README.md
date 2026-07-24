@@ -33,6 +33,9 @@ Prerequis : Node.js 24 ou plus recent.
 - Panneau admin : kick, ban, unban, creation et suppression de salons.
 - Historique et bannissements sauvegardes en SQLite local ou PostgreSQL/Supabase.
 - Anti-spam simple : limite les rafales et les messages identiques repetes.
+- Protection publique : limites de connexion et d'inscription, verrouillage apres plusieurs echecs
+  et journal de securite reserve aux administrateurs.
+- Verification anti-robot Cloudflare Turnstile activable gratuitement.
 - Commandes simples : `/me texte`, `/clear` et `/help`.
 
 ## Architecture simple
@@ -93,6 +96,30 @@ DATABASE_SSL=true
 
 Sans `DATABASE_URL`, Tchatelia utilise automatiquement SQLite local.
 
+## Protection publique
+
+La protection publique est active par defaut. Elle limite les tentatives de connexion, la creation
+de comptes et le nombre de connexions simultanees depuis une meme source. Apres cinq echecs
+d'authentification, l'acces est verrouille pendant 15 minutes. Les nouveaux mots de passe doivent
+contenir au moins huit caracteres.
+
+Utiliser une valeur longue et privee pour anonymiser les sources dans le journal de securite :
+
+```text
+PUBLIC_PROTECTION=true
+SECURITY_HASH_SECRET=une-longue-valeur-secrete-et-unique
+```
+
+Le CAPTCHA Cloudflare Turnstile est facultatif. Lorsqu'une cle de site et une cle secrete sont
+presentes, il apparait automatiquement sur l'ecran de connexion :
+
+```text
+TURNSTILE_SITE_KEY=
+TURNSTILE_SECRET_KEY=
+```
+
+Ne jamais publier `SECURITY_HASH_SECRET` ou `TURNSTILE_SECRET_KEY` sur GitHub.
+
 Il est aussi possible de le changer au lancement :
 
 ```bash
@@ -116,7 +143,8 @@ Pour une premiere mise en ligne gratuite :
 5. Choisir ce depot GitHub.
 6. Utiliser `npm install` comme commande d'installation.
 7. Utiliser `npm start` comme commande de demarrage.
-8. Ajouter dans Render les variables `ADMIN_PASSWORD`, `DATABASE_URL` et `DATABASE_SSL=true`.
+8. Ajouter dans Render les variables `ADMIN_PASSWORD`, `DATABASE_URL`, `DATABASE_SSL=true`,
+   `PUBLIC_PROTECTION=true` et `SECURITY_HASH_SECRET`.
 
 Important : utiliser `npm install`, pas `npm ci`, car Render doit installer la
 dependance PostgreSQL `pg` a partir de `package.json`.

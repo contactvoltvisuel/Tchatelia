@@ -139,6 +139,28 @@ p {
   font-size: 12px;
 }
 
+.login-security {
+  display: grid;
+  gap: 7px;
+  min-width: 0;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--canvas);
+}
+
+.login-security p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+#turnstileWidget {
+  min-width: 0;
+  width: 100%;
+}
+
 .auth-mode {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
@@ -420,6 +442,7 @@ button:hover {
 
 .admin-account-panel,
 .admin-moderation-log-panel,
+.admin-security-panel,
 .admin-report-panel,
 .admin-contact-panel {
   display: grid;
@@ -528,6 +551,53 @@ button:hover {
 }
 
 .admin-moderation-log small {
+  color: var(--muted);
+  line-height: 1.35;
+}
+
+.admin-security-summary {
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.admin-security-summary strong {
+  color: var(--accent-dark);
+  font-size: 20px;
+}
+
+.admin-security-list {
+  max-height: 360px;
+  display: grid;
+  gap: 8px;
+  overflow-y: auto;
+}
+
+.admin-security-event {
+  display: grid;
+  gap: 4px;
+  padding: 9px;
+  border-left: 3px solid #bf8d28;
+  background: #fff;
+  font-size: 12px;
+}
+
+.admin-security-event.temporary_lock,
+.admin-security-event.access_rate_limit,
+.admin-security-event.connection_limit,
+.admin-security-event.registration_limit {
+  border-left-color: var(--warm);
+}
+
+.admin-security-event strong,
+.admin-security-event span,
+.admin-security-event small {
+  overflow-wrap: anywhere;
+}
+
+.admin-security-event small {
   color: var(--muted);
   line-height: 1.35;
 }
@@ -2202,6 +2272,7 @@ button {
 .admin-block,
 .admin-account-panel,
 .admin-moderation-log-panel,
+.admin-security-panel,
 .admin-report-panel,
 .admin-contact-panel {
   min-width: 0;
@@ -2243,6 +2314,11 @@ button {
 }
 
 .admin-moderation-log {
+  border-radius: 5px;
+  background: var(--canvas);
+}
+
+.admin-security-event {
   border-radius: 5px;
   background: var(--canvas);
 }

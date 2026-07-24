@@ -46,8 +46,10 @@
           <li>Moderation : bannissements, journal d'actions, blocages et signalements.</li>
           <li>Contact : nom, adresse e-mail, sujet et contenu de la demande.</li>
           <li>
-            Donnees techniques : adresse IP utilisee temporairement pour limiter le spam du
-            formulaire, et journaux de connexion susceptibles d'etre produits par les hebergeurs.
+            Donnees techniques : empreinte pseudonymisee de l'adresse reseau utilisee pour limiter
+            les abus et tenir le journal de securite, adresse IP utilisee temporairement pour
+            limiter le spam du formulaire, et journaux susceptibles d'etre produits par les
+            hebergeurs.
           </li>
         </ul>
         <p>
@@ -105,9 +107,14 @@
             signalement deviennent visibles par l'equipe de moderation.
           </li>
           <li>Les demandes de contact et leurs adresses e-mail sont reservees aux administrateurs.</li>
+          <li>Le journal de securite pseudonymise est reserve aux administrateurs.</li>
           <li>
             Les donnees sont techniquement traitees par Render pour l'application et Supabase pour
             la base PostgreSQL.
+          </li>
+          <li>
+            Si la verification anti-robot est activee, Cloudflare Turnstile traite les informations
+            techniques necessaires a cette verification.
           </li>
         </ul>
       </section>
@@ -121,7 +128,11 @@
           sous-traitants encadres par ses conditions de traitement. Les documents des fournisseurs
           sont disponibles dans leur
           <a href="https://render.com/dpa" rel="noreferrer">DPA Render</a> et leur
-          <a href="https://supabase.com/privacy" rel="noreferrer">politique Supabase</a>.
+          <a href="https://supabase.com/privacy" rel="noreferrer">politique Supabase</a>. Si
+          Turnstile est active, la verification est aussi soumise a la
+          <a href="https://www.cloudflare.com/privacypolicy/" rel="noreferrer">
+            politique de confidentialite Cloudflare
+          </a>.
         </p>
       </section>
 
@@ -136,6 +147,7 @@
           <li>Messages prives : les 250 derniers messages de chaque conversation.</li>
           <li>Bannissements : jusqu'a leur levee par l'equipe.</li>
           <li>Journal de moderation : les 500 actions les plus recentes.</li>
+          <li>Journal de securite pseudonymise : les 1 000 evenements les plus recents.</li>
           <li>
             Signalements : jusqu'a leur traitement ; une fois traites, au maximum 24 mois et dans
             la limite des 1 000 dossiers les plus recents.
@@ -155,8 +167,10 @@
         <p>
           Les mots de passe ne sont pas conserves en clair : ils sont transformes avec scrypt et un
           sel individuel. Les acces sont transmis en HTTPS sur le site deploye. Les droits admin et
-          moderateur limitent l'acces aux outils sensibles. Aucun service ne pouvant garantir une
-          securite absolue, utilise un mot de passe unique.
+          moderateur limitent l'acces aux outils sensibles. Les adresses reseau inscrites dans le
+          journal de securite sont transformees avec une cle secrete et ne sont pas conservees en
+          clair par Tchatelia dans ce journal. Aucun service ne pouvant garantir une securite
+          absolue, utilise un mot de passe unique.
         </p>
       </section>
 

@@ -3,6 +3,10 @@ const socket = io();
 const loginPanel = document.querySelector("#loginPanel");
 const chatPanel = document.querySelector("#chatPanel");
 const loginForm = document.querySelector("#loginForm");
+const accountPasswordInput = document.querySelector("#accountPassword");
+const authModeInputs = document.querySelectorAll('input[name="authMode"]');
+const loginSecurity = document.querySelector("#loginSecurity");
+const turnstileWidget = document.querySelector("#turnstileWidget");
 const messageForm = document.querySelector("#messageForm");
 const messageInput = document.querySelector("#messageInput");
 const messages = document.querySelector("#messages");
@@ -24,6 +28,10 @@ const adminAccountList = document.querySelector("#adminAccountList");
 const adminModerationLogPanel = document.querySelector(".admin-moderation-log-panel");
 const adminRefreshLogsButton = document.querySelector("#adminRefreshLogsButton");
 const adminModerationLogList = document.querySelector("#adminModerationLogList");
+const adminSecurityPanel = document.querySelector(".admin-security-panel");
+const adminRefreshSecurityButton = document.querySelector("#adminRefreshSecurityButton");
+const adminSecurityEventCount = document.querySelector("#adminSecurityEventCount");
+const adminSecurityList = document.querySelector("#adminSecurityList");
 const adminRefreshReportsButton = document.querySelector("#adminRefreshReportsButton");
 const adminReportList = document.querySelector("#adminReportList");
 const adminContactPanel = document.querySelector(".admin-contact-panel");
@@ -117,6 +125,7 @@ let currentAccountNickname = "";
 let currentUsers = [];
 let currentAccounts = [];
 let currentModerationLogs = [];
+let currentSecurityEvents = [];
 let currentReports = [];
 let currentContactMessages = [];
 let selectedAvatar = null;
@@ -129,11 +138,20 @@ let pendingReport = null;
 let currentRooms = [];
 let privateUnreadTotal = 0;
 let audioContext = null;
+let turnstileToken = "";
+let turnstileWidgetId = null;
 let alertsEnabled =
   typeof Notification !== "undefined" &&
   Notification.permission === "granted" &&
   localStorage.getItem("tchateliaAlerts") === "enabled";
 const unreadByRoom = new Map();
+
+initializePublicProtection();
+updateAuthModeRequirements();
+
+authModeInputs.forEach((input) => {
+  input.addEventListener("change", updateAuthModeRequirements);
+});
 
 loginForm.addEventListener("submit", (event) => {
   event.preventDefault();
@@ -150,10 +168,12 @@ loginForm.addEventListener("submit", (event) => {
       accountPassword: data.get("accountPassword"),
       authMode: data.get("authMode"),
       legalAccepted: data.get("legalAccepted") === "on",
+      turnstileToken,
     },
     (response) => {
       if (!response.ok) {
         currentAccount = false;
+        resetTurnstile();
         alert(response.error || "Impossible d'entrer dans le chat.");
         return;
       }
@@ -518,6 +538,12 @@ adminRefreshLogsButton.addEventListener("click", () => {
   });
 });
 
+adminRefreshSecurityButton.addEventListener("click", () => {
+  socket.emit("security-action", {
+    action: "list",
+  });
+});
+
 adminRefreshReportsButton.addEventListener("click", () => {
   socket.emit("report-action", {
     action: "list",
@@ -667,6 +693,11 @@ socket.on("accounts", (accounts) => {
 socket.on("moderation-logs", (logs) => {
   currentModerationLogs = logs;
   renderModerationLog();
+});
+
+socket.on("security-events", (events) => {
+  currentSecurityEvents = events;
+  renderSecurityEvents();
 });
 
 socket.on("reports", (reports) => {
@@ -834,6 +865,7 @@ function renderAdminPanel() {
     adminUserList.innerHTML = "";
     adminAccountList.innerHTML = "";
     adminModerationLogList.innerHTML = "";
+    adminSecurityList.innerHTML = "";
     adminReportList.innerHTML = "";
     adminContactList.innerHTML = "";
     return;
@@ -847,6 +879,7 @@ function renderAdminPanel() {
   adminDeleteRoomButton.classList.toggle("hidden", !canManage);
   adminAccountPanel.classList.toggle("hidden", !canManage);
   adminModerationLogPanel.classList.toggle("hidden", !canManage);
+  adminSecurityPanel.classList.toggle("hidden", !canManage);
   adminContactPanel.classList.toggle("hidden", !canManage);
   adminDeleteRoomButton.disabled = currentRoom === "accueil";
   socket.emit("report-action", {
@@ -860,12 +893,16 @@ function renderAdminPanel() {
     socket.emit("moderation-log-action", {
       action: "list",
     });
+    socket.emit("security-action", {
+      action: "list",
+    });
     socket.emit("contact-action", {
       action: "list",
     });
   } else {
     adminAccountList.innerHTML = "";
     adminModerationLogList.innerHTML = "";
+    adminSecurityList.innerHTML = "";
     adminContactList.innerHTML = "";
   }
 
@@ -891,6 +928,7 @@ function renderAdminPanel() {
 
   renderAccountPanel();
   renderModerationLog();
+  renderSecurityEvents();
   renderReports();
   renderContactMessages();
 }
@@ -1002,6 +1040,56 @@ function renderModerationLog() {
     row.append(title, details, meta);
     adminModerationLogList.append(row);
   });
+}
+
+function renderSecurityEvents() {
+  if (currentRole !== "admin") return;
+
+  adminSecurityEventCount.textContent = String(currentSecurityEvents.length);
+  adminSecurityList.innerHTML = "";
+
+  if (!currentSecurityEvents.length) {
+    const empty = document.createElement("p");
+    empty.className = "admin-empty";
+    empty.textContent = "Aucun incident de securite.";
+    adminSecurityList.append(empty);
+    return;
+  }
+
+  currentSecurityEvents.forEach((securityEvent) => {
+    const row = document.createElement("article");
+    row.className = `admin-security-event ${securityEvent.eventType}`;
+
+    const title = document.createElement("strong");
+    title.textContent = formatSecurityEvent(securityEvent.eventType);
+
+    const details = document.createElement("span");
+    details.textContent = securityEvent.details;
+
+    const meta = document.createElement("small");
+    const date = new Intl.DateTimeFormat("fr-FR", {
+      dateStyle: "short",
+      timeStyle: "short",
+    }).format(Number(securityEvent.createdAt));
+    meta.textContent = `${date} - source ${securityEvent.identityHash}`;
+
+    row.append(title, details, meta);
+    adminSecurityList.append(row);
+  });
+}
+
+function formatSecurityEvent(eventType) {
+  const labels = {
+    account_password_failure: "Mot de passe incorrect",
+    admin_password_failure: "Acces admin refuse",
+    unknown_account: "Compte inconnu",
+    temporary_lock: "Verrouillage temporaire",
+    access_rate_limit: "Trop de tentatives",
+    connection_limit: "Trop de connexions",
+    registration_limit: "Trop d'inscriptions",
+    captcha_failure: "Verification anti-robot refusee",
+  };
+  return labels[eventType] || eventType;
 }
 
 function renderReports() {
@@ -1595,6 +1683,80 @@ function resizeAvatar(file) {
 
     image.src = objectUrl;
   });
+}
+
+function updateAuthModeRequirements() {
+  const mode = document.querySelector('input[name="authMode"]:checked')?.value;
+  accountPasswordInput.required = mode === "login" || mode === "register";
+  accountPasswordInput.minLength = mode === "register" ? 8 : 0;
+  accountPasswordInput.placeholder =
+    mode === "register"
+      ? "8 caracteres minimum"
+      : mode === "login"
+        ? "Mot de passe du compte"
+        : "Optionnel";
+}
+
+async function initializePublicProtection() {
+  try {
+    const response = await fetch("/api/public-config", {
+      headers: { accept: "application/json" },
+    });
+    if (!response.ok) return;
+    const config = await response.json();
+    if (!config.turnstileEnabled || !config.turnstileSiteKey) return;
+
+    loginSecurity.classList.remove("hidden");
+    await loadTurnstileScript();
+    turnstileWidgetId = window.turnstile.render(turnstileWidget, {
+      sitekey: config.turnstileSiteKey,
+      theme: "light",
+      size: "flexible",
+      callback: (token) => {
+        turnstileToken = token;
+      },
+      "expired-callback": () => {
+        turnstileToken = "";
+      },
+      "error-callback": () => {
+        turnstileToken = "";
+      },
+    });
+  } catch {
+    loginSecurity.classList.add("hidden");
+  }
+}
+
+function loadTurnstileScript() {
+  if (window.turnstile) return Promise.resolve();
+
+  return new Promise((resolve, reject) => {
+    const existingScript = document.querySelector('script[data-turnstile-api="true"]');
+    if (existingScript) {
+      existingScript.addEventListener("load", resolve, { once: true });
+      existingScript.addEventListener("error", reject, { once: true });
+      return;
+    }
+
+    const script = document.createElement("script");
+    script.src = "https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit";
+    script.async = true;
+    script.defer = true;
+    script.dataset.turnstileApi = "true";
+    script.addEventListener("load", resolve, { once: true });
+    script.addEventListener("error", reject, { once: true });
+    document.head.append(script);
+  });
+}
+
+function resetTurnstile() {
+  turnstileToken = "";
+  if (
+    turnstileWidgetId !== null &&
+    window.turnstile?.reset
+  ) {
+    window.turnstile.reset(turnstileWidgetId);
+  }
 }
 
 function updateNotificationButton() {

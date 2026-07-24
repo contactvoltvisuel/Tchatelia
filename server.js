@@ -1,7 +1,13 @@
 import "./config.js";
 import express from "express";
 import { createServer } from "node:http";
-import { randomBytes, timingSafeEqual, scrypt as scryptCallback } from "node:crypto";
+import {
+  createHmac,
+  randomBytes,
+  randomUUID,
+  timingSafeEqual,
+  scrypt as scryptCallback,
+} from "node:crypto";
 import { existsSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { promisify } from "node:util";
@@ -34,10 +40,12 @@ import {
   listPrivateBlocks,
   listPrivateMessagesForAccount,
   listReports,
+  listSecurityEvents,
   markPrivateMessagesRead,
   savePrivateMessage,
   saveMessage,
   saveModerationLog,
+  saveSecurityEvent,
   setAccountActive,
   setPrivateBlock,
   trimRoomHistory,
@@ -69,7 +77,21 @@ const SPAM_MAX_MESSAGES = 5;
 const SPAM_COOLDOWN_MS = 15_000;
 const DUPLICATE_COOLDOWN_MS = 8_000;
 const MODERATION_ROLES = new Set(["admin", "moderator"]);
+const PUBLIC_PROTECTION_ENABLED = process.env.PUBLIC_PROTECTION !== "false";
+const TURNSTILE_SITE_KEY = String(process.env.TURNSTILE_SITE_KEY || "").trim();
+const TURNSTILE_SECRET_KEY = String(process.env.TURNSTILE_SECRET_KEY || "").trim();
+const TURNSTILE_ENABLED = Boolean(TURNSTILE_SITE_KEY && TURNSTILE_SECRET_KEY);
+const SECURITY_HASH_SECRET =
+  process.env.SECURITY_HASH_SECRET || ADMIN_PASSWORD || "tchatelia-security";
+const AUTH_WINDOW_MS = 10 * 60_000;
+const MAX_AUTH_ATTEMPTS = 20;
+const MAX_AUTH_FAILURES = 5;
+const AUTH_LOCK_MS = 15 * 60_000;
+const REGISTRATION_WINDOW_MS = 60 * 60_000;
+const MAX_REGISTRATIONS = 3;
+const MAX_CONNECTIONS_PER_IDENTITY = 8;
 const contactRateLimits = new Map();
+const protectionStates = new Map();
 
 await initDatabase();
 
@@ -94,6 +116,22 @@ app.use(express.static(__dirname));
 
 app.get("/", (request, response) => {
   response.sendFile(existsSync(publicIndex) ? publicIndex : rootIndex);
+});
+
+app.get("/health", (request, response) => {
+  response.set("Cache-Control", "no-store").json({
+    ok: true,
+    service: "tchatelia",
+    protection: PUBLIC_PROTECTION_ENABLED,
+  });
+});
+
+app.get("/api/public-config", (request, response) => {
+  response.set("Cache-Control", "no-store").json({
+    publicProtection: PUBLIC_PROTECTION_ENABLED,
+    turnstileEnabled: TURNSTILE_ENABLED,
+    turnstileSiteKey: TURNSTILE_ENABLED ? TURNSTILE_SITE_KEY : "",
+  });
 });
 
 app.get("/avatar/:nickname", async (request, response) => {
@@ -187,7 +225,15 @@ app.post("/api/contact", async (request, response) => {
 
 io.on("connection", (socket) => {
   socket.on("join", async (
-    { nickname, room, adminPassword, accountPassword, authMode, legalAccepted },
+    {
+      nickname,
+      room,
+      adminPassword,
+      accountPassword,
+      authMode,
+      legalAccepted,
+      turnstileToken,
+    },
     callback
   ) => {
     const cleanNickname = cleanName(nickname);
@@ -197,6 +243,7 @@ io.on("connection", (socket) => {
     const isAdmin = String(adminPassword || "") === ADMIN_PASSWORD;
     const cleanAuthMode = ["guest", "login", "register"].includes(authMode) ? authMode : "guest";
     const cleanAccountPassword = String(accountPassword || "");
+    const securityIdentity = getSecurityIdentity(socket);
 
     if (legalAccepted !== true) {
       callback?.({
@@ -206,7 +253,44 @@ io.on("connection", (socket) => {
       return;
     }
 
+    const protectionCheck = await checkJoinProtection(
+      securityIdentity,
+      cleanAuthMode,
+      cleanNickname
+    );
+    if (!protectionCheck.ok) {
+      callback?.({
+        ok: false,
+        error: protectionCheck.error,
+        protected: true,
+      });
+      return;
+    }
+
+    if (
+      TURNSTILE_ENABLED &&
+      !(await verifyTurnstileToken(turnstileToken, securityIdentity.rawIp))
+    ) {
+      await recordSecurityEvent(
+        "captcha_failure",
+        securityIdentity.hash,
+        `Verification refusee pour ${cleanNickname}`
+      );
+      callback?.({
+        ok: false,
+        error: "La verification anti-robot a echoue. Reessaie.",
+        protected: true,
+        resetCaptcha: true,
+      });
+      return;
+    }
+
     if (wantsAdmin && !isAdmin) {
+      await registerAuthFailure(
+        securityIdentity.hash,
+        "admin_password_failure",
+        cleanNickname
+      );
       callback?.({
         ok: false,
         error: "Mot de passe admin incorrect.",
@@ -215,10 +299,10 @@ io.on("connection", (socket) => {
     }
 
     if (cleanAuthMode === "register") {
-      if (cleanAccountPassword.length < 6) {
+      if (cleanAccountPassword.length < 8) {
         callback?.({
           ok: false,
-          error: "Le mot de passe du compte doit faire au moins 6 caracteres.",
+          error: "Le mot de passe du compte doit faire au moins 8 caracteres.",
         });
         return;
       }
@@ -263,6 +347,11 @@ io.on("connection", (socket) => {
       }
 
       if (!(await verifyPassword(cleanAccountPassword, account))) {
+        await registerAuthFailure(
+          securityIdentity.hash,
+          "account_password_failure",
+          cleanNickname
+        );
         callback?.({
           ok: false,
           error: "Mot de passe du compte incorrect.",
@@ -272,6 +361,11 @@ io.on("connection", (socket) => {
     }
 
     if (!account && cleanAuthMode === "login") {
+      await registerAuthFailure(
+        securityIdentity.hash,
+        "unknown_account",
+        cleanNickname
+      );
       callback?.({
         ok: false,
         error: "Aucun compte n'existe avec ce pseudo.",
@@ -279,6 +373,7 @@ io.on("connection", (socket) => {
       return;
     }
 
+    registerSuccessfulAccess(securityIdentity.hash, cleanAuthMode);
     const role = account?.role || (isAdmin ? "admin" : "user");
     const displayName = account?.displayName || cleanNickname;
 
@@ -304,6 +399,7 @@ io.on("connection", (socket) => {
       privateMessagesEnabled: account
         ? Boolean(account.privateMessagesEnabled)
         : true,
+      securityIdentityHash: securityIdentity.hash,
       memberSince: account?.createdAt || Date.now(),
       messageTimes: [],
       lastMessage: "",
@@ -321,6 +417,7 @@ io.on("connection", (socket) => {
       await sendAccountList(socket);
       await sendModerationLogs(socket);
       await sendContactMessages(socket);
+      await sendSecurityEvents(socket);
     }
     if (MODERATION_ROLES.has(role)) {
       await sendReports(socket);
@@ -506,6 +603,16 @@ io.on("connection", (socket) => {
     if (action === "list") await sendModerationLogs(socket);
   });
 
+  socket.on("security-action", async ({ action } = {}) => {
+    const user = users.get(socket.id);
+    if (!user || user.role !== "admin") {
+      emitPrivateSystem(socket, "Journal de securite reserve aux admins.");
+      return;
+    }
+
+    if (action === "list") await sendSecurityEvents(socket);
+  });
+
   socket.on("profile-action", async ({ action, nickname, bio, avatarUrl } = {}) => {
     const user = users.get(socket.id);
     if (!user) return;
@@ -619,6 +726,183 @@ function cleanName(value) {
 
 function normalizeName(value) {
   return String(value || "").trim().toLocaleLowerCase("fr-FR");
+}
+
+function getSecurityIdentity(socket) {
+  const forwardedAddresses = String(
+    socket.handshake.headers["x-forwarded-for"] || ""
+  )
+    .split(",")
+    .map((address) => address.trim())
+    .filter(Boolean);
+  const forwardedFor = forwardedAddresses.at(-1) || "";
+  const rawIp = forwardedFor || socket.handshake.address || "unknown";
+  const hash = createHmac("sha256", SECURITY_HASH_SECRET)
+    .update(rawIp)
+    .digest("hex")
+    .slice(0, 16);
+  return { rawIp, hash };
+}
+
+function getProtectionState(identityHash) {
+  let state = protectionStates.get(identityHash);
+  if (!state) {
+    state = {
+      attempts: [],
+      failures: [],
+      registrations: [],
+      lockedUntil: 0,
+    };
+    protectionStates.set(identityHash, state);
+  }
+  return state;
+}
+
+function keepRecent(timestamps, windowMs, now) {
+  return timestamps.filter((timestamp) => now - timestamp < windowMs);
+}
+
+async function checkJoinProtection(identity, authMode, nickname) {
+  if (!PUBLIC_PROTECTION_ENABLED) return { ok: true };
+
+  const now = Date.now();
+  const state = getProtectionState(identity.hash);
+  state.attempts = keepRecent(state.attempts, AUTH_WINDOW_MS, now);
+  state.failures = keepRecent(state.failures, AUTH_LOCK_MS, now);
+  state.registrations = keepRecent(
+    state.registrations,
+    REGISTRATION_WINDOW_MS,
+    now
+  );
+
+  if (state.lockedUntil > now) {
+    const minutes = Math.max(1, Math.ceil((state.lockedUntil - now) / 60_000));
+    return {
+      ok: false,
+      error: `Acces temporairement verrouille. Reessaie dans ${minutes} min.`,
+    };
+  }
+
+  if (state.attempts.length >= MAX_AUTH_ATTEMPTS) {
+    state.lockedUntil = now + AUTH_LOCK_MS;
+    await recordSecurityEvent(
+      "access_rate_limit",
+      identity.hash,
+      `Trop de tentatives pour ${nickname}`
+    );
+    return {
+      ok: false,
+      error: "Trop de tentatives. Acces verrouille pendant 15 minutes.",
+    };
+  }
+
+  const connectedCount = [...users.values()].filter(
+    (user) => user.securityIdentityHash === identity.hash
+  ).length;
+  if (connectedCount >= MAX_CONNECTIONS_PER_IDENTITY) {
+    await recordSecurityEvent(
+      "connection_limit",
+      identity.hash,
+      `Limite de connexions atteinte pour ${nickname}`
+    );
+    return {
+      ok: false,
+      error: "Trop de connexions simultanees depuis ce reseau.",
+    };
+  }
+
+  if (
+    authMode === "register" &&
+    state.registrations.length >= MAX_REGISTRATIONS
+  ) {
+    await recordSecurityEvent(
+      "registration_limit",
+      identity.hash,
+      `Limite d'inscriptions atteinte pour ${nickname}`
+    );
+    return {
+      ok: false,
+      error: "Limite de creation de comptes atteinte. Reessaie plus tard.",
+    };
+  }
+
+  state.attempts.push(now);
+  if (protectionStates.size > 5000) {
+    for (const [key, candidate] of protectionStates.entries()) {
+      const latestActivity = Math.max(
+        candidate.lockedUntil,
+        ...candidate.attempts,
+        ...candidate.failures,
+        ...candidate.registrations,
+        0
+      );
+      if (now - latestActivity > REGISTRATION_WINDOW_MS) {
+        protectionStates.delete(key);
+      }
+    }
+  }
+  return { ok: true };
+}
+
+async function registerAuthFailure(identityHash, eventType, nickname) {
+  if (!PUBLIC_PROTECTION_ENABLED) return;
+
+  const now = Date.now();
+  const state = getProtectionState(identityHash);
+  state.failures = keepRecent(state.failures, AUTH_LOCK_MS, now);
+  state.failures.push(now);
+  await recordSecurityEvent(
+    eventType,
+    identityHash,
+    `Echec de connexion pour ${nickname}`
+  );
+
+  if (state.failures.length >= MAX_AUTH_FAILURES) {
+    state.lockedUntil = now + AUTH_LOCK_MS;
+    await recordSecurityEvent(
+      "temporary_lock",
+      identityHash,
+      `Acces verrouille apres ${state.failures.length} echecs`
+    );
+  }
+}
+
+function registerSuccessfulAccess(identityHash, authMode) {
+  if (!PUBLIC_PROTECTION_ENABLED) return;
+
+  const state = getProtectionState(identityHash);
+  state.failures = [];
+  state.lockedUntil = 0;
+  if (authMode === "register") state.registrations.push(Date.now());
+}
+
+async function verifyTurnstileToken(rawToken, remoteIp) {
+  if (!TURNSTILE_ENABLED) return true;
+  const token = String(rawToken || "").trim();
+  if (!token || token.length > 2048) return false;
+
+  try {
+    const response = await fetch(
+      "https://challenges.cloudflare.com/turnstile/v0/siteverify",
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          secret: TURNSTILE_SECRET_KEY,
+          response: token,
+          remoteip: remoteIp,
+          idempotency_key: randomUUID(),
+        }),
+        signal: AbortSignal.timeout(7000),
+      }
+    );
+    if (!response.ok) return false;
+    const verification = await response.json();
+    return verification.success === true;
+  } catch (error) {
+    console.error("Erreur de verification Turnstile:", error.message);
+    return false;
+  }
 }
 
 function cleanDisplayName(value) {
@@ -833,10 +1117,10 @@ async function handleSettingsAction(socket, user, payload, callback) {
       callback?.({ ok: false, error: "Le mot de passe actuel est incorrect." });
       return;
     }
-    if (newPassword.length < 6) {
+    if (newPassword.length < 8) {
       callback?.({
         ok: false,
-        error: "Le nouveau mot de passe doit faire au moins 6 caracteres.",
+        error: "Le nouveau mot de passe doit faire au moins 8 caracteres.",
       });
       return;
     }
@@ -1388,8 +1672,8 @@ async function handleAccountAction(socket, admin, action, rawNickname, rawRole, 
 
   if (action === "password") {
     const password = String(rawPassword || "");
-    if (password.length < 6) {
-      emitPrivateSystem(socket, "Le nouveau mot de passe doit faire au moins 6 caracteres.");
+    if (password.length < 8) {
+      emitPrivateSystem(socket, "Le nouveau mot de passe doit faire au moins 8 caracteres.");
       return;
     }
 
@@ -1522,6 +1806,27 @@ async function recordModerationAction(actor, action, target, details) {
   const logs = await listModerationLogs(100);
   for (const [socketId, user] of users.entries()) {
     if (user.role === "admin") io.to(socketId).emit("moderation-logs", logs);
+  }
+}
+
+async function sendSecurityEvents(socket) {
+  socket.emit("security-events", await listSecurityEvents(100));
+}
+
+async function recordSecurityEvent(eventType, identityHash, details) {
+  await saveSecurityEvent({
+    id: crypto.randomUUID(),
+    eventType: String(eventType || "security_event").slice(0, 40),
+    identityHash: String(identityHash || "unknown").slice(0, 32),
+    details: String(details || "").slice(0, 180),
+    createdAt: Date.now(),
+  });
+
+  const events = await listSecurityEvents(100);
+  for (const [socketId, user] of users.entries()) {
+    if (user.role === "admin") {
+      io.to(socketId).emit("security-events", events);
+    }
   }
 }
 

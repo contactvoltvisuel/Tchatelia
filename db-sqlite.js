@@ -66,6 +66,17 @@ export async function initDatabase() {
       created_at INTEGER NOT NULL
     );
 
+    CREATE TABLE IF NOT EXISTS security_events (
+      id TEXT PRIMARY KEY,
+      event_type TEXT NOT NULL,
+      identity_hash TEXT NOT NULL,
+      details TEXT NOT NULL,
+      created_at INTEGER NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS security_events_created_idx
+      ON security_events (created_at DESC);
+
     CREATE TABLE IF NOT EXISTS private_messages (
       id TEXT PRIMARY KEY,
       sender TEXT NOT NULL,
@@ -225,6 +236,40 @@ export async function saveModerationLog(log) {
       FROM moderation_logs
       ORDER BY created_at DESC
       LIMIT 500
+    )
+  `);
+}
+
+export async function listSecurityEvents(limit = 100) {
+  return db
+    .prepare(`
+      SELECT id, event_type AS eventType, identity_hash AS identityHash,
+        details, created_at AS createdAt
+      FROM security_events
+      ORDER BY created_at DESC
+      LIMIT ?
+    `)
+    .all(limit);
+}
+
+export async function saveSecurityEvent(event) {
+  db.prepare(`
+    INSERT INTO security_events (id, event_type, identity_hash, details, created_at)
+    VALUES (?, ?, ?, ?, ?)
+  `).run(
+    event.id,
+    event.eventType,
+    event.identityHash,
+    event.details,
+    event.createdAt
+  );
+  db.exec(`
+    DELETE FROM security_events
+    WHERE id NOT IN (
+      SELECT id
+      FROM security_events
+      ORDER BY created_at DESC
+      LIMIT 1000
     )
   `);
 }

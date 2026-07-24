@@ -82,6 +82,11 @@
             placeholder="Optionnel"
           />
 
+          <div class="login-security hidden" id="loginSecurity">
+            <p>Verification de securite</p>
+            <div id="turnstileWidget"></div>
+          </div>
+
           <label class="access-consent">
             <input name="legalAccepted" type="checkbox" required />
             <span>
@@ -360,6 +365,18 @@
           <div class="admin-moderation-log-list" id="adminModerationLogList"></div>
         </section>
 
+        <section class="admin-block admin-security-panel">
+          <div class="admin-section-title">
+            <h2>Securite</h2>
+            <button id="adminRefreshSecurityButton" type="button">Actualiser</button>
+          </div>
+          <div class="admin-security-summary">
+            <strong id="adminSecurityEventCount">0</strong>
+            <span>evenements recents</span>
+          </div>
+          <div class="admin-security-list" id="adminSecurityList"></div>
+        </section>
+
         <section class="admin-block admin-contact-panel">
           <div class="admin-section-title">
             <h2>Contact</h2>
@@ -477,7 +494,7 @@
           <input
             id="settingsNewPassword"
             type="password"
-            minlength="6"
+            minlength="8"
             autocomplete="new-password"
             required
           />
@@ -485,7 +502,7 @@
           <input
             id="settingsConfirmPassword"
             type="password"
-            minlength="6"
+            minlength="8"
             autocomplete="new-password"
             required
           />
