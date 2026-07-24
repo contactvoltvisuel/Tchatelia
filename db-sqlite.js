@@ -106,6 +106,18 @@ export async function initDatabase() {
     CREATE INDEX IF NOT EXISTS email_verification_account_idx
       ON email_verification_tokens (account_nickname, created_at DESC);
 
+    CREATE TABLE IF NOT EXISTS account_sessions (
+      token_hash TEXT PRIMARY KEY,
+      account_nickname TEXT NOT NULL,
+      expires_at INTEGER NOT NULL,
+      created_at INTEGER NOT NULL,
+      last_used_at INTEGER NOT NULL,
+      FOREIGN KEY (account_nickname) REFERENCES accounts(nickname)
+    );
+
+    CREATE INDEX IF NOT EXISTS account_sessions_account_idx
+      ON account_sessions (account_nickname, created_at DESC);
+
     CREATE TABLE IF NOT EXISTS moderation_logs (
       id TEXT PRIMARY KEY,
       actor TEXT NOT NULL,
@@ -755,6 +767,66 @@ export async function clearAccountEmailTokens(nickname) {
   db.prepare("DELETE FROM email_verification_tokens WHERE account_nickname = ?").run(nickname);
 }
 
+export async function createAccountSession(session) {
+  db.exec("BEGIN");
+  try {
+    db.prepare("DELETE FROM account_sessions WHERE expires_at < ?").run(Date.now());
+    db.prepare(`
+      INSERT INTO account_sessions (
+        token_hash, account_nickname, expires_at, created_at, last_used_at
+      )
+      VALUES (?, ?, ?, ?, ?)
+    `).run(
+      session.tokenHash,
+      session.accountNickname,
+      session.expiresAt,
+      session.createdAt,
+      session.createdAt
+    );
+    db.prepare(`
+      DELETE FROM account_sessions
+      WHERE token_hash IN (
+        SELECT token_hash
+        FROM account_sessions
+        WHERE account_nickname = ?
+        ORDER BY created_at DESC
+        LIMIT -1 OFFSET 10
+      )
+    `).run(session.accountNickname);
+    db.exec("COMMIT");
+  } catch (error) {
+    db.exec("ROLLBACK");
+    throw error;
+  }
+}
+
+export async function getAccountSession(tokenHash) {
+  return db
+    .prepare(`
+      SELECT token_hash AS tokenHash, account_nickname AS accountNickname,
+        expires_at AS expiresAt, created_at AS createdAt, last_used_at AS lastUsedAt
+      FROM account_sessions
+      WHERE token_hash = ?
+    `)
+    .get(tokenHash);
+}
+
+export async function touchAccountSession(tokenHash, lastUsedAt) {
+  db.prepare(`
+    UPDATE account_sessions
+    SET last_used_at = ?
+    WHERE token_hash = ?
+  `).run(lastUsedAt, tokenHash);
+}
+
+export async function deleteAccountSession(tokenHash) {
+  db.prepare("DELETE FROM account_sessions WHERE token_hash = ?").run(tokenHash);
+}
+
+export async function deleteAccountSessions(nickname) {
+  db.prepare("DELETE FROM account_sessions WHERE account_nickname = ?").run(nickname);
+}
+
 export async function createPasswordResetToken(token) {
   db.exec("BEGIN");
   try {
@@ -828,6 +900,7 @@ export async function deleteAccount(nickname) {
     db.prepare("DELETE FROM reports WHERE reporter = ?").run(nickname);
     db.prepare("DELETE FROM password_reset_tokens WHERE account_nickname = ?").run(nickname);
     db.prepare("DELETE FROM email_verification_tokens WHERE account_nickname = ?").run(nickname);
+    db.prepare("DELETE FROM account_sessions WHERE account_nickname = ?").run(nickname);
     db.prepare("DELETE FROM message_favorites WHERE account_nickname = ?").run(nickname);
     db.prepare("DELETE FROM private_blocks WHERE blocker = ? OR blocked = ?").run(
       nickname,

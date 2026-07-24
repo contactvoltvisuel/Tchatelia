@@ -139,6 +139,8 @@ const settingsCurrentPassword = document.querySelector("#settingsCurrentPassword
 const settingsNewPassword = document.querySelector("#settingsNewPassword");
 const settingsConfirmPassword = document.querySelector("#settingsConfirmPassword");
 const settingsPasswordStatus = document.querySelector("#settingsPasswordStatus");
+const settingsLogoutAllButton = document.querySelector("#settingsLogoutAllButton");
+const settingsSessionsStatus = document.querySelector("#settingsSessionsStatus");
 const settingsBlockedCount = document.querySelector("#settingsBlockedCount");
 const settingsBlockedList = document.querySelector("#settingsBlockedList");
 const settingsDeleteForm = document.querySelector("#settingsDeleteForm");
@@ -219,56 +221,63 @@ let alertsEnabled =
   localStorage.getItem("tchateliaAlerts") === "enabled";
 const unreadByRoom = new Map();
 
-initializePublicProtection();
 updateAuthModeRequirements();
 openPasswordResetConfirmationFromUrl();
 openEmailVerificationFromUrl();
+initializeApplication();
 
 authModeInputs.forEach((input) => {
   input.addEventListener("change", updateAuthModeRequirements);
 });
 
-loginForm.addEventListener("submit", (event) => {
+loginForm.addEventListener("submit", async (event) => {
   event.preventDefault();
   const data = new FormData(loginForm);
-  currentNickname = data.get("nickname");
-  currentAccount = data.get("authMode") !== "guest";
+  const authMode = String(data.get("authMode") || "guest");
+  const requestedRoom = String(data.get("room") || "accueil");
+  const submitButton = loginForm.querySelector('button[type="submit"]');
+  submitButton.disabled = true;
 
-  socket.emit(
-    "join",
-    {
-      nickname: currentNickname,
-      room: data.get("room"),
+  try {
+    if (authMode === "login") {
+      const sessionResponse = await createBrowserSession({
+        nickname: data.get("nickname"),
+        password: data.get("accountPassword"),
+        turnstileToken,
+      });
+      if (!sessionResponse.ok) {
+        handleJoinFailure(sessionResponse);
+        return;
+      }
+      await reconnectSocketForSession();
+      joinChat({
+        nickname: sessionResponse.account.nickname,
+        room: requestedRoom,
+        adminPassword: "",
+        accountPassword: "",
+        accountEmail: "",
+        authMode: "session",
+        legalAccepted: true,
+        turnstileToken: "",
+      });
+      return;
+    }
+
+    joinChat({
+      nickname: data.get("nickname"),
+      room: requestedRoom,
       adminPassword: data.get("adminPassword"),
       accountPassword: data.get("accountPassword"),
       accountEmail: data.get("accountEmail"),
-      authMode: data.get("authMode"),
+      authMode,
       legalAccepted: data.get("legalAccepted") === "on",
       turnstileToken,
-    },
-    (response) => {
-      if (!response.ok) {
-        currentAccount = false;
-        resetTurnstile();
-        if (response.verificationRequired) {
-          openEmailVerificationDialog({
-            email: response.email,
-            message: response.message,
-          });
-          return;
-        }
-        alert(response.error || "Impossible d'entrer dans le chat.");
-        return;
-      }
-
-      currentRoom = response.room;
-      currentNickname = response.nickname;
-      currentRole = response.role;
-      currentAccount = response.account;
-      currentAccountNickname = response.accountNickname;
-      showChat(response);
-    }
-  );
+    });
+  } catch {
+    alert("La connexion n'a pas pu etre terminee. Reessaie.");
+  } finally {
+    submitButton.disabled = false;
+  }
 });
 
 messageForm.addEventListener("submit", (event) => {
@@ -431,6 +440,7 @@ passwordResetConfirmForm.addEventListener("submit", (event) => {
       if (!response?.ok) return;
       passwordResetConfirmForm.reset();
       activePasswordResetToken = "";
+      logoutCurrentSession({ reload: false });
       window.history.replaceState({}, document.title, window.location.pathname);
       window.setTimeout(() => passwordResetDialog.close(), 1400);
     }
@@ -479,9 +489,9 @@ composerContextCancel.addEventListener("click", () => {
   messageInput.focus();
 });
 
-leaveButton.addEventListener("click", () => {
+leaveButton.addEventListener("click", async () => {
   stopTyping();
-  window.location.reload();
+  await logoutCurrentSession();
 });
 
 myProfileButton.addEventListener("click", () => {
@@ -619,9 +629,33 @@ settingsPasswordForm.addEventListener("submit", (event) => {
         return;
       }
       settingsPasswordForm.reset();
+      if (response.sessionRevoked) {
+        alert(response.message || "Mot de passe modifie. Reconnecte-toi.");
+        logoutCurrentSession();
+        return;
+      }
       setSettingsStatus(settingsPasswordStatus, response.message || "Mot de passe modifie.");
     }
   );
+});
+
+settingsLogoutAllButton.addEventListener("click", () => {
+  if (!confirm("Deconnecter Tchatelia sur tous tes appareils ?")) return;
+  settingsLogoutAllButton.disabled = true;
+  setSettingsStatus(settingsSessionsStatus, "Deconnexion...");
+  socket.emit("settings-action", { action: "logout-all" }, (response) => {
+    settingsLogoutAllButton.disabled = false;
+    if (!response?.ok) {
+      setSettingsStatus(
+        settingsSessionsStatus,
+        response?.error || "Impossible de fermer les sessions.",
+        true
+      );
+      return;
+    }
+    alert(response.message || "Toutes les sessions ont ete fermees.");
+    logoutCurrentSession();
+  });
 });
 
 settingsDeleteForm.addEventListener("submit", (event) => {
@@ -1079,6 +1113,11 @@ socket.on("account-deleted", () => {
   window.location.reload();
 });
 
+socket.on("sessions-revoked", ({ reason }) => {
+  alert(reason || "Ta session a ete fermee. Reconnecte-toi.");
+  logoutCurrentSession();
+});
+
 socket.on("private-state", (state) => {
   privateConversations = state.conversations;
   privateUnreadTotal = state.totalUnread;
@@ -1146,6 +1185,9 @@ function switchRoom(room) {
     if (!response?.ok) return;
     clearMessageAction();
     currentRoom = response.room;
+    if (currentAccount) {
+      localStorage.setItem("tchateliaLastRoom", currentRoom);
+    }
     roomName.textContent = `#${response.room}`;
     roomTopic.textContent = response.topic;
     renderTypingIndicator([]);
@@ -1793,6 +1835,7 @@ function openAccountSettings() {
   settingsBlockedCount.textContent = "0";
   setSettingsStatus(settingsGeneralStatus, "");
   setSettingsStatus(settingsPasswordStatus, "");
+  setSettingsStatus(settingsSessionsStatus, "");
   setSettingsStatus(settingsDeleteStatus, "");
 
   socket.emit("settings-action", { action: "get" }, (response) => {
@@ -2191,6 +2234,135 @@ function updateAuthModeRequirements() {
       : mode === "login"
         ? "Mot de passe du compte"
         : "Optionnel";
+}
+
+async function initializeApplication() {
+  await initializePublicProtection();
+  const query = new URLSearchParams(window.location.search);
+  if (query.has("resetToken") || query.has("verifyEmail")) return;
+  await tryAutomaticLogin();
+}
+
+async function tryAutomaticLogin() {
+  try {
+    const response = await fetch("/api/session", {
+      headers: { accept: "application/json" },
+      credentials: "same-origin",
+    });
+    if (!response.ok) return;
+    const session = await response.json();
+    if (!session?.ok || !session.account?.nickname) return;
+
+    joinChat(
+      {
+        nickname: session.account.nickname,
+        room: localStorage.getItem("tchateliaLastRoom") || "accueil",
+        adminPassword: "",
+        accountPassword: "",
+        accountEmail: "",
+        authMode: "session",
+        legalAccepted: true,
+        turnstileToken: "",
+      },
+      { automatic: true }
+    );
+  } catch {
+    // The normal login form remains available when a saved session cannot be read.
+  }
+}
+
+async function createBrowserSession({ nickname, password, turnstileToken: captchaToken }) {
+  const response = await fetch("/api/session", {
+    method: "POST",
+    headers: {
+      accept: "application/json",
+      "content-type": "application/json",
+    },
+    credentials: "same-origin",
+    body: JSON.stringify({
+      nickname,
+      password,
+      turnstileToken: captchaToken,
+    }),
+  });
+  const payload = await response.json().catch(() => ({}));
+  return {
+    ...payload,
+    ok: response.ok && payload.ok === true,
+  };
+}
+
+function reconnectSocketForSession() {
+  return new Promise((resolve, reject) => {
+    const timeout = window.setTimeout(() => {
+      socket.off("connect", handleConnect);
+      reject(new Error("Socket reconnection timeout"));
+    }, 5000);
+    const handleConnect = () => {
+      window.clearTimeout(timeout);
+      resolve();
+    };
+    socket.once("connect", handleConnect);
+    if (socket.connected) socket.disconnect();
+    socket.connect();
+  });
+}
+
+function joinChat(payload, { automatic = false } = {}) {
+  currentNickname = String(payload.nickname || "");
+  currentAccount = payload.authMode !== "guest";
+  socket.emit("join", payload, (response) => {
+    if (!response?.ok) {
+      currentAccount = false;
+      if (response?.sessionExpired) {
+        logoutCurrentSession({ reload: false });
+        if (!automatic) {
+          alert(response.error || "Ta session a expire. Connecte-toi de nouveau.");
+        }
+        return;
+      }
+      handleJoinFailure(response, { automatic });
+      return;
+    }
+
+    currentRoom = response.room;
+    currentNickname = response.nickname;
+    currentRole = response.role;
+    currentAccount = response.account;
+    currentAccountNickname = response.accountNickname;
+    if (currentAccount) {
+      localStorage.setItem("tchateliaLastRoom", currentRoom);
+    }
+    showChat(response);
+  });
+}
+
+function handleJoinFailure(response = {}, { automatic = false } = {}) {
+  currentAccount = false;
+  resetTurnstile();
+  if (response.verificationRequired) {
+    openEmailVerificationDialog({
+      email: response.email,
+      message: response.message,
+    });
+    return;
+  }
+  if (!automatic) {
+    alert(response.error || "Impossible d'entrer dans le chat.");
+  }
+}
+
+async function logoutCurrentSession({ reload = true } = {}) {
+  try {
+    await fetch("/api/session", {
+      method: "DELETE",
+      headers: { accept: "application/json" },
+      credentials: "same-origin",
+    });
+  } catch {
+    // Reloading still clears the current chat state if the network request fails.
+  }
+  if (reload) window.location.reload();
 }
 
 async function initializePublicProtection() {

@@ -43,6 +43,7 @@ Prerequis : Node.js 24 ou plus recent.
 - Verification anti-robot Cloudflare Turnstile activable gratuitement.
 - Recuperation du mot de passe par e-mail avec un lien unique valable 30 minutes.
 - Verification des nouvelles adresses e-mail avec un lien unique valable 24 heures.
+- Connexion automatique securisee pendant 30 jours avec deconnexion par appareil ou globale.
 - Commandes simples : `/me texte`, `/clear` et `/help`.
 
 ## Architecture simple
@@ -62,6 +63,11 @@ Prerequis : Node.js 24 ou plus recent.
 
 Cette architecture reste volontairement simple, mais les donnees importantes
 survivent maintenant aux redemarrages.
+
+Les sessions de compte utilisent un cookie `HttpOnly`, `SameSite=Lax` et `Secure` sur le site
+HTTPS. Le navigateur ne conserve ni le mot de passe ni le jeton de session dans son stockage
+JavaScript. Les jetons sont enregistres sous forme d'empreinte dans la base et expirent apres
+30 jours.
 
 ## Lancer en local
 

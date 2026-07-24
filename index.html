@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Tchatelia</title>
     <link rel="icon" href="data:," />
-    <link rel="stylesheet" href="/styles.css?v=20260724-6" />
+    <link rel="stylesheet" href="/styles.css?v=20260724-7" />
   </head>
   <body>
     <main class="shell">
@@ -648,6 +648,18 @@
       </form>
 
       <section class="settings-section">
+        <h3>Connexions</h3>
+        <button
+          class="profile-remove-avatar"
+          id="settingsLogoutAllButton"
+          type="button"
+        >
+          Deconnecter tous les appareils
+        </button>
+        <p class="settings-status" id="settingsSessionsStatus" role="status"></p>
+      </section>
+
+      <section class="settings-section">
         <div class="settings-section-title">
           <h3>Utilisateurs bloques</h3>
           <span id="settingsBlockedCount">0</span>
@@ -814,6 +826,6 @@
     </dialog>
 
     <script src="/socket.io/socket.io.js"></script>
-    <script src="/app.js?v=20260724-6"></script>
+    <script src="/app.js?v=20260724-7"></script>
   </body>
 </html>

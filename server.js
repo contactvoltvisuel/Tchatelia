@@ -19,15 +19,19 @@ import {
   clearAccountEmailTokens,
   createContactMessage,
   createAccount,
+  createAccountSession,
   createEmailVerificationToken,
   createPasswordResetToken,
   createReport,
   createRoom,
   deleteAccount,
+  deleteAccountSession,
+  deleteAccountSessions,
   deleteMessageContent,
   deleteRoom,
   getAccountByNickname,
   getAccountByEmail,
+  getAccountSession,
   getContactMessageById,
   getDatabaseLabel,
   getMessageById,
@@ -63,6 +67,7 @@ import {
   setMessageFavorite,
   setPinnedMessage,
   trimRoomHistory,
+  touchAccountSession,
   unbanNickname,
   updateAccountPassword,
   updateAccountProfile,
@@ -114,6 +119,10 @@ const PASSWORD_RESET_ENABLED = Boolean(
 const EMAIL_VERIFICATION_ENABLED = PASSWORD_RESET_ENABLED;
 const PASSWORD_RESET_TTL_MS = 30 * 60_000;
 const EMAIL_VERIFICATION_TTL_MS = 24 * 60 * 60_000;
+const ACCOUNT_SESSION_TTL_MS = 30 * 24 * 60 * 60_000;
+const ACCOUNT_SESSION_COOKIE = "tchatelia_session";
+const ACCOUNT_SESSION_SECURE =
+  /^https:\/\//i.test(PUBLIC_URL) || process.env.NODE_ENV === "production";
 const PASSWORD_RESET_WINDOW_MS = 60 * 60_000;
 const MAX_PASSWORD_RESET_REQUESTS = 3;
 const MAX_EMAIL_VERIFICATION_REQUESTS = 3;
@@ -184,6 +193,144 @@ app.get("/api/public-config", (request, response) => {
     passwordResetEnabled: PASSWORD_RESET_ENABLED,
     emailVerificationEnabled: EMAIL_VERIFICATION_ENABLED,
   });
+});
+
+app.get("/api/session", async (request, response) => {
+  response.set("Cache-Control", "no-store");
+  try {
+    const sessionState = await getSessionAccountFromHeaders(request.headers);
+    if (!sessionState) {
+      clearSessionCookie(request, response);
+      response.status(401).json({ ok: false });
+      return;
+    }
+    response.json({
+      ok: true,
+      account: {
+        nickname: sessionState.account.nickname,
+        displayName: sessionState.account.displayName,
+      },
+    });
+  } catch (error) {
+    console.error("Erreur lecture de session:", error.message);
+    clearSessionCookie(request, response);
+    response.status(401).json({ ok: false });
+  }
+});
+
+app.post("/api/session", async (request, response) => {
+  response.set("Cache-Control", "no-store");
+  const cleanNickname = cleanName(request.body?.nickname);
+  const password = String(request.body?.password || "");
+  const identity = getSecurityIdentity(request);
+
+  try {
+    const protectionCheck = await checkJoinProtection(identity, "login", cleanNickname);
+    if (!protectionCheck.ok) {
+      response.status(429).json({
+        ok: false,
+        error: protectionCheck.error,
+        protected: true,
+      });
+      return;
+    }
+
+    if (
+      TURNSTILE_ENABLED &&
+      !(await verifyTurnstileToken(request.body?.turnstileToken, identity.rawIp))
+    ) {
+      await recordSecurityEvent(
+        "captcha_failure",
+        identity.hash,
+        `Verification refusee pour ${cleanNickname}`
+      );
+      response.status(400).json({
+        ok: false,
+        error: "La verification anti-robot a echoue. Reessaie.",
+        protected: true,
+        resetCaptcha: true,
+      });
+      return;
+    }
+
+    const account = await findAccountByIdentity(cleanNickname);
+    if (!account || !(await verifyPassword(password, account))) {
+      await registerAuthFailure(
+        identity.hash,
+        account ? "account_password_failure" : "unknown_account",
+        cleanNickname
+      );
+      response.status(401).json({
+        ok: false,
+        error: account
+          ? "Mot de passe du compte incorrect."
+          : "Aucun compte n'existe avec ce pseudo.",
+      });
+      return;
+    }
+
+    if (!account.active) {
+      response.status(403).json({ ok: false, error: "Ce compte est desactive." });
+      return;
+    }
+
+    if (EMAIL_VERIFICATION_ENABLED && !account.emailVerified) {
+      response.status(403).json({
+        ok: false,
+        verificationRequired: true,
+        email: account.email,
+        message: "Verifie ton adresse e-mail avant de te connecter.",
+      });
+      return;
+    }
+
+    if (
+      (await isBanned(account.nickname)) ||
+      (await isBanned(normalizeName(account.displayName)))
+    ) {
+      response.status(403).json({
+        ok: false,
+        error: "Ce compte est banni du chat.",
+      });
+      return;
+    }
+
+    const rawToken = randomBytes(32).toString("hex");
+    const createdAt = Date.now();
+    await createAccountSession({
+      tokenHash: hashResetToken(rawToken),
+      accountNickname: account.nickname,
+      expiresAt: createdAt + ACCOUNT_SESSION_TTL_MS,
+      createdAt,
+    });
+    setSessionCookie(request, response, rawToken);
+    registerSuccessfulAccess(identity.hash, "login");
+    response.json({
+      ok: true,
+      account: {
+        nickname: account.nickname,
+        displayName: account.displayName,
+      },
+    });
+  } catch (error) {
+    console.error("Erreur creation de session:", error.message);
+    response.status(500).json({
+      ok: false,
+      error: "La connexion n'a pas pu etre terminee. Reessaie plus tard.",
+    });
+  }
+});
+
+app.delete("/api/session", async (request, response) => {
+  response.set("Cache-Control", "no-store");
+  try {
+    const rawToken = getSessionTokenFromHeaders(request.headers);
+    if (rawToken) await deleteAccountSession(hashResetToken(rawToken));
+  } catch (error) {
+    console.error("Erreur suppression de session:", error.message);
+  }
+  clearSessionCookie(request, response);
+  response.json({ ok: true });
 });
 
 app.get("/avatar/:nickname", async (request, response) => {
@@ -448,6 +595,10 @@ io.on("connection", (socket) => {
         tokenRecord.accountNickname,
         await hashPassword(newPassword)
       );
+      await revokeAccountSessions(
+        tokenRecord.accountNickname,
+        "Ton mot de passe a change. Reconnecte-toi."
+      );
       await markPasswordResetTokenUsed(tokenRecord.tokenHash, Date.now());
       callback?.({
         ok: true,
@@ -475,16 +626,19 @@ io.on("connection", (socket) => {
     },
     callback
   ) => {
-    const cleanNickname = cleanName(nickname);
-    const normalizedNickname = normalizeName(cleanNickname);
+    let cleanNickname = cleanName(nickname);
+    let normalizedNickname = normalizeName(cleanNickname);
     const cleanRoom = rooms.has(room) ? room : "accueil";
     const wantsAdmin = Boolean(String(adminPassword || "").trim());
     const isAdmin = String(adminPassword || "") === ADMIN_PASSWORD;
-    const cleanAuthMode = ["guest", "login", "register"].includes(authMode) ? authMode : "guest";
+    const cleanAuthMode = ["guest", "login", "register", "session"].includes(authMode)
+      ? authMode
+      : "guest";
     const cleanAccountPassword = String(accountPassword || "");
     const cleanAccountEmail = normalizeEmail(accountEmail);
     const securityIdentity = getSecurityIdentity(socket);
     let registeredNow = false;
+    let sessionAccount = null;
 
     if (legalAccepted !== true) {
       callback?.({
@@ -492,6 +646,31 @@ io.on("connection", (socket) => {
         error: "Tu dois confirmer ton age et accepter les textes du site.",
       });
       return;
+    }
+
+    if (cleanAuthMode === "session") {
+      try {
+        const sessionState = await getSessionAccountFromHeaders(socket.handshake.headers);
+        if (!sessionState) {
+          callback?.({
+            ok: false,
+            sessionExpired: true,
+            error: "Ta session a expire. Connecte-toi de nouveau.",
+          });
+          return;
+        }
+        sessionAccount = sessionState.account;
+        cleanNickname = sessionAccount.displayName;
+        normalizedNickname = sessionAccount.nickname;
+      } catch (error) {
+        console.error("Erreur connexion automatique:", error.message);
+        callback?.({
+          ok: false,
+          sessionExpired: true,
+          error: "La connexion automatique a echoue.",
+        });
+        return;
+      }
     }
 
     const protectionCheck = await checkJoinProtection(
@@ -510,6 +689,7 @@ io.on("connection", (socket) => {
 
     if (
       TURNSTILE_ENABLED &&
+      cleanAuthMode !== "session" &&
       !(await verifyTurnstileToken(turnstileToken, securityIdentity.rawIp))
     ) {
       await recordSecurityEvent(
@@ -586,7 +766,7 @@ io.on("connection", (socket) => {
       registeredNow = true;
     }
 
-    const account = await findAccountByIdentity(cleanNickname);
+    const account = sessionAccount || (await findAccountByIdentity(cleanNickname));
     const accountNickname = account?.nickname || normalizedNickname;
 
     if (account && cleanAuthMode !== "register") {
@@ -598,7 +778,7 @@ io.on("connection", (socket) => {
         return;
       }
 
-      if (cleanAuthMode !== "login") {
+      if (cleanAuthMode !== "login" && cleanAuthMode !== "session") {
         callback?.({
           ok: false,
           error: "Ce pseudo est reserve. Utilise la connexion compte.",
@@ -606,7 +786,10 @@ io.on("connection", (socket) => {
         return;
       }
 
-      if (!(await verifyPassword(cleanAccountPassword, account))) {
+      if (
+        cleanAuthMode === "login" &&
+        !(await verifyPassword(cleanAccountPassword, account))
+      ) {
         await registerAuthFailure(
           securityIdentity.hash,
           "account_password_failure",
@@ -620,7 +803,7 @@ io.on("connection", (socket) => {
       }
     }
 
-    if (!account && cleanAuthMode === "login") {
+    if (!account && (cleanAuthMode === "login" || cleanAuthMode === "session")) {
       await registerAuthFailure(
         securityIdentity.hash,
         "unknown_account",
@@ -1332,6 +1515,70 @@ function hashResetToken(token) {
   return createHash("sha256").update(String(token || "")).digest("hex");
 }
 
+function parseCookies(rawCookieHeader) {
+  const cookies = new Map();
+  for (const part of String(rawCookieHeader || "").split(";")) {
+    const separatorIndex = part.indexOf("=");
+    if (separatorIndex < 1) continue;
+    const name = part.slice(0, separatorIndex).trim();
+    const value = part.slice(separatorIndex + 1).trim();
+    if (!name) continue;
+    cookies.set(name, value);
+  }
+  return cookies;
+}
+
+function getSessionTokenFromHeaders(headers = {}) {
+  const token = parseCookies(headers.cookie).get(ACCOUNT_SESSION_COOKIE) || "";
+  return /^[a-f0-9]{64}$/i.test(token) ? token : "";
+}
+
+function setSessionCookie(request, response, rawToken) {
+  const secure = ACCOUNT_SESSION_SECURE || request.secure ? "; Secure" : "";
+  response.setHeader(
+    "Set-Cookie",
+    `${ACCOUNT_SESSION_COOKIE}=${rawToken}; HttpOnly; Path=/; SameSite=Lax; Max-Age=${
+      ACCOUNT_SESSION_TTL_MS / 1000
+    }; Priority=High${secure}`
+  );
+}
+
+function clearSessionCookie(request, response) {
+  const secure = ACCOUNT_SESSION_SECURE || request.secure ? "; Secure" : "";
+  response.setHeader(
+    "Set-Cookie",
+    `${ACCOUNT_SESSION_COOKIE}=; HttpOnly; Path=/; SameSite=Lax; Max-Age=0; Priority=High${secure}`
+  );
+}
+
+async function getSessionAccountFromHeaders(headers = {}) {
+  const rawToken = getSessionTokenFromHeaders(headers);
+  if (!rawToken) return null;
+
+  const tokenHash = hashResetToken(rawToken);
+  const session = await getAccountSession(tokenHash);
+  if (!session || Number(session.expiresAt) <= Date.now()) {
+    if (session) await deleteAccountSession(tokenHash);
+    return null;
+  }
+
+  const account = await getAccountByNickname(session.accountNickname);
+  if (
+    !account ||
+    !account.active ||
+    (EMAIL_VERIFICATION_ENABLED && !account.emailVerified)
+  ) {
+    await deleteAccountSession(tokenHash);
+    return null;
+  }
+
+  const now = Date.now();
+  if (now - Number(session.lastUsedAt || 0) > 5 * 60_000) {
+    await touchAccountSession(tokenHash, now);
+  }
+  return { account, session, tokenHash };
+}
+
 function canRequestPasswordReset(identityHash) {
   const now = Date.now();
   const recentRequests = keepRecent(
@@ -1474,15 +1721,21 @@ function normalizeName(value) {
   return String(value || "").trim().toLocaleLowerCase("fr-FR");
 }
 
-function getSecurityIdentity(socket) {
+function getSecurityIdentity(source) {
+  const headers = source.handshake?.headers || source.headers || {};
   const forwardedAddresses = String(
-    socket.handshake.headers["x-forwarded-for"] || ""
+    headers["x-forwarded-for"] || ""
   )
     .split(",")
     .map((address) => address.trim())
     .filter(Boolean);
   const forwardedFor = forwardedAddresses.at(-1) || "";
-  const rawIp = forwardedFor || socket.handshake.address || "unknown";
+  const rawIp =
+    forwardedFor ||
+    source.handshake?.address ||
+    source.ip ||
+    source.socket?.remoteAddress ||
+    "unknown";
   const hash = createHmac("sha256", SECURITY_HASH_SECRET)
     .update(rawIp)
     .digest("hex")
@@ -1512,6 +1765,7 @@ async function checkJoinProtection(identity, authMode, nickname) {
   if (!PUBLIC_PROTECTION_ENABLED) return { ok: true };
 
   const now = Date.now();
+  const isTrustedSession = authMode === "session";
   const state = getProtectionState(identity.hash);
   state.attempts = keepRecent(state.attempts, AUTH_WINDOW_MS, now);
   state.failures = keepRecent(state.failures, AUTH_LOCK_MS, now);
@@ -1521,7 +1775,7 @@ async function checkJoinProtection(identity, authMode, nickname) {
     now
   );
 
-  if (state.lockedUntil > now) {
+  if (!isTrustedSession && state.lockedUntil > now) {
     const minutes = Math.max(1, Math.ceil((state.lockedUntil - now) / 60_000));
     return {
       ok: false,
@@ -1529,7 +1783,7 @@ async function checkJoinProtection(identity, authMode, nickname) {
     };
   }
 
-  if (state.attempts.length >= MAX_AUTH_ATTEMPTS) {
+  if (!isTrustedSession && state.attempts.length >= MAX_AUTH_ATTEMPTS) {
     state.lockedUntil = now + AUTH_LOCK_MS;
     await recordSecurityEvent(
       "access_rate_limit",
@@ -1556,6 +1810,8 @@ async function checkJoinProtection(identity, authMode, nickname) {
       error: "Trop de connexions simultanees depuis ce reseau.",
     };
   }
+
+  if (isTrustedSession) return { ok: true };
 
   if (
     authMode === "register" &&
@@ -1928,7 +2184,30 @@ async function handleSettingsAction(socket, user, payload, callback) {
     }
 
     await updateAccountPassword(account.nickname, await hashPassword(newPassword));
-    callback?.({ ok: true, message: "Mot de passe modifie." });
+    await revokeAccountSessions(
+      account.nickname,
+      "Ton mot de passe a change. Reconnecte-toi.",
+      socket.id
+    );
+    callback?.({
+      ok: true,
+      sessionRevoked: true,
+      message: "Mot de passe modifie. Reconnecte-toi.",
+    });
+    return;
+  }
+
+  if (action === "logout-all") {
+    await revokeAccountSessions(
+      account.nickname,
+      "Toutes les sessions de ton compte ont ete fermees.",
+      socket.id
+    );
+    callback?.({
+      ok: true,
+      sessionRevoked: true,
+      message: "Toutes les sessions ont ete fermees.",
+    });
     return;
   }
 
@@ -2457,7 +2736,10 @@ async function handleAccountAction(socket, admin, action, rawNickname, rawRole, 
     }
 
     await setAccountActive(nickname, active);
-    if (!active) disconnectAccount(nickname, "Ton compte a ete desactive.");
+    if (!active) {
+      await deleteAccountSessions(nickname);
+      disconnectAccount(nickname, "Ton compte a ete desactive.");
+    }
     emitPrivateSystem(socket, `${account.displayName} est maintenant ${active ? "actif" : "desactive"}.`);
     await recordModerationAction(
       logActor,
@@ -2477,6 +2759,10 @@ async function handleAccountAction(socket, admin, action, rawNickname, rawRole, 
     }
 
     await updateAccountPassword(nickname, await hashPassword(password));
+    await revokeAccountSessions(
+      nickname,
+      "Ton mot de passe a ete reinitialise. Reconnecte-toi."
+    );
     emitPrivateSystem(socket, `Mot de passe de ${account.displayName} reinitialise.`);
     await recordModerationAction(
       logActor,
@@ -2501,6 +2787,26 @@ function disconnectAccount(accountNickname, reason) {
     io.to(socketId).emit("moderated", { reason });
     io.sockets.sockets.get(socketId)?.disconnect(true);
   }
+}
+
+async function revokeAccountSessions(accountNickname, reason, exceptSocketId = "") {
+  await deleteAccountSessions(accountNickname);
+  const socketsToDisconnect = [];
+  for (const [socketId, user] of users.entries()) {
+    if (
+      user.accountNickname !== accountNickname ||
+      socketId === exceptSocketId
+    ) {
+      continue;
+    }
+    io.to(socketId).emit("sessions-revoked", { reason });
+    socketsToDisconnect.push(socketId);
+  }
+  setTimeout(() => {
+    for (const socketId of socketsToDisconnect) {
+      io.sockets.sockets.get(socketId)?.disconnect(true);
+    }
+  }, 200);
 }
 
 function disconnectDeletedAccountLater(accountNickname) {

@@ -97,6 +97,17 @@ export async function initDatabase() {
     CREATE INDEX IF NOT EXISTS email_verification_account_idx
       ON email_verification_tokens (account_nickname, created_at DESC);
 
+    CREATE TABLE IF NOT EXISTS account_sessions (
+      token_hash TEXT PRIMARY KEY,
+      account_nickname TEXT NOT NULL REFERENCES accounts(nickname) ON DELETE CASCADE,
+      expires_at BIGINT NOT NULL,
+      created_at BIGINT NOT NULL,
+      last_used_at BIGINT NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS account_sessions_account_idx
+      ON account_sessions (account_nickname, created_at DESC);
+
     CREATE TABLE IF NOT EXISTS moderation_logs (
       id TEXT PRIMARY KEY,
       actor TEXT NOT NULL,
@@ -780,6 +791,76 @@ export async function clearAccountEmailTokens(nickname) {
   ]);
 }
 
+export async function createAccountSession(session) {
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    await client.query("DELETE FROM account_sessions WHERE expires_at < $1", [Date.now()]);
+    await client.query(
+      `
+        INSERT INTO account_sessions (
+          token_hash, account_nickname, expires_at, created_at, last_used_at
+        )
+        VALUES ($1, $2, $3, $4, $4)
+      `,
+      [
+        session.tokenHash,
+        session.accountNickname,
+        session.expiresAt,
+        session.createdAt,
+      ]
+    );
+    await client.query(
+      `
+        DELETE FROM account_sessions
+        WHERE token_hash IN (
+          SELECT token_hash
+          FROM account_sessions
+          WHERE account_nickname = $1
+          ORDER BY created_at DESC
+          OFFSET 10
+        )
+      `,
+      [session.accountNickname]
+    );
+    await client.query("COMMIT");
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+export async function getAccountSession(tokenHash) {
+  const result = await pool.query(
+    `
+      SELECT token_hash AS "tokenHash", account_nickname AS "accountNickname",
+        expires_at AS "expiresAt", created_at AS "createdAt",
+        last_used_at AS "lastUsedAt"
+      FROM account_sessions
+      WHERE token_hash = $1
+    `,
+    [tokenHash]
+  );
+  return result.rows[0];
+}
+
+export async function touchAccountSession(tokenHash, lastUsedAt) {
+  await pool.query(
+    "UPDATE account_sessions SET last_used_at = $1 WHERE token_hash = $2",
+    [lastUsedAt, tokenHash]
+  );
+}
+
+export async function deleteAccountSession(tokenHash) {
+  await pool.query("DELETE FROM account_sessions WHERE token_hash = $1", [tokenHash]);
+}
+
+export async function deleteAccountSessions(nickname) {
+  await pool.query("DELETE FROM account_sessions WHERE account_nickname = $1", [nickname]);
+}
+
 export async function createPasswordResetToken(token) {
   const client = await pool.connect();
   try {
@@ -871,6 +952,7 @@ export async function deleteAccount(nickname) {
     await client.query("DELETE FROM email_verification_tokens WHERE account_nickname = $1", [
       nickname,
     ]);
+    await client.query("DELETE FROM account_sessions WHERE account_nickname = $1", [nickname]);
     await client.query("DELETE FROM message_favorites WHERE account_nickname = $1", [nickname]);
     await client.query(
       "DELETE FROM private_blocks WHERE blocker = $1 OR blocked = $1",

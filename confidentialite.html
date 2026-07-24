@@ -44,6 +44,10 @@
             Compte : pseudo, adresse e-mail, etat de verification, empreinte securisee du mot de
             passe, role, statut et date de creation.
           </li>
+          <li>
+            Session : empreinte du jeton de connexion, compte associe, dates de creation,
+            d'expiration et de derniere utilisation.
+          </li>
           <li>Profil : description et photo choisies par l'utilisateur.</li>
           <li>Chat : messages publics, messages prives et informations de salon.</li>
           <li>Reactions : choix du compte associe a chaque reaction sur un message public.</li>
@@ -175,6 +179,10 @@
           <li>
             Demandes de contact : jusqu'a leur traitement, puis au maximum 12 mois.
           </li>
+          <li>
+            Sessions de connexion : 30 jours au maximum, ou moins en cas de deconnexion,
+            changement de mot de passe, desactivation ou suppression du compte.
+          </li>
           <li>Limitation du formulaire : l'adresse IP reste en memoire pendant environ une minute.</li>
           <li>
             Journaux techniques des hebergeurs : selon les durees definies par ces fournisseurs.
@@ -186,10 +194,11 @@
         <h2>8. Securite</h2>
         <p>
           Les mots de passe ne sont pas conserves en clair : ils sont transformes avec scrypt et un
-          sel individuel. Les acces sont transmis en HTTPS sur le site deploye. Les droits admin et
-          moderateur limitent l'acces aux outils sensibles. Les adresses reseau inscrites dans le
-          journal de securite sont transformees avec une cle secrete et ne sont pas conservees en
-          clair par Tchatelia dans ce journal. Aucun service ne pouvant garantir une securite
+          sel individuel. Les jetons de session sont aleatoires et seule leur empreinte est
+          conservee en base. Les acces sont transmis en HTTPS sur le site deploye. Les droits admin
+          et moderateur limitent l'acces aux outils sensibles. Les adresses reseau inscrites dans
+          le journal de securite sont transformees avec une cle secrete et ne sont pas conservees
+          en clair par Tchatelia dans ce journal. Aucun service ne pouvant garantir une securite
           absolue, utilise un mot de passe unique.
         </p>
       </section>
@@ -228,9 +237,10 @@
         <h2>11. Cookies et traceurs</h2>
         <p>
           Tchatelia n'integre actuellement ni publicite, ni outil de profilage, ni mesure d'audience
-          tierce. Le fonctionnement en temps reel peut utiliser des mecanismes techniques de
-          connexion strictement necessaires. Si des traceurs non essentiels sont ajoutes, cette
-          politique et le recueil du consentement seront adaptes avant leur activation.
+          tierce. Un cookie de session strictement necessaire permet de rester connecte pendant
+          30 jours. Il est inaccessible au JavaScript du site et peut etre supprime avec le bouton
+          Sortir ou depuis les parametres du compte. Si des traceurs non essentiels sont ajoutes,
+          cette politique et le recueil du consentement seront adaptes avant leur activation.
         </p>
       </section>
 
@@ -239,7 +249,7 @@
         <p>
           Cette politique peut etre actualisee si le service ou les fournisseurs changent. La date
           de version sera modifiee et les changements importants seront portes a la connaissance
-          des utilisateurs. Version applicable : 23 juillet 2026.
+          des utilisateurs. Version applicable : 24 juillet 2026.
         </p>
       </section>
     </main>
