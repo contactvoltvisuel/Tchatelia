@@ -6,7 +6,9 @@ const database = process.env.DATABASE_URL
 
 export const {
   banNickname,
+  clearAccountEmailTokens,
   createContactMessage,
+  createEmailVerificationToken,
   createPasswordResetToken,
   createRoom,
   createAccount,
@@ -21,6 +23,7 @@ export const {
   getPrivateConversation,
   getPrivateMessageById,
   getPasswordResetToken,
+  getEmailVerificationToken,
   getReportById,
   getRoomHistory,
   getRooms,
@@ -37,6 +40,7 @@ export const {
   listSecurityEvents,
   markPrivateMessagesRead,
   markPasswordResetTokenUsed,
+  markEmailVerificationTokenUsed,
   createReport,
   getMessageById,
   savePrivateMessage,
@@ -49,6 +53,7 @@ export const {
   trimRoomHistory,
   unbanNickname,
   setAccountActive,
+  setAccountEmailVerified,
   updateAccountPassword,
   updateAccountProfile,
   updateAccountSettings,

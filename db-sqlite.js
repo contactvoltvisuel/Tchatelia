@@ -65,6 +65,7 @@ export async function initDatabase() {
       avatar_url TEXT NOT NULL DEFAULT '',
       private_messages_enabled INTEGER NOT NULL DEFAULT 1,
       email TEXT NOT NULL DEFAULT '',
+      email_verified INTEGER NOT NULL DEFAULT 0,
       created_at INTEGER NOT NULL
     );
 
@@ -91,6 +92,19 @@ export async function initDatabase() {
 
     CREATE INDEX IF NOT EXISTS password_reset_account_idx
       ON password_reset_tokens (account_nickname, created_at DESC);
+
+    CREATE TABLE IF NOT EXISTS email_verification_tokens (
+      token_hash TEXT PRIMARY KEY,
+      account_nickname TEXT NOT NULL,
+      email TEXT NOT NULL,
+      expires_at INTEGER NOT NULL,
+      used_at INTEGER,
+      created_at INTEGER NOT NULL,
+      FOREIGN KEY (account_nickname) REFERENCES accounts(nickname)
+    );
+
+    CREATE INDEX IF NOT EXISTS email_verification_account_idx
+      ON email_verification_tokens (account_nickname, created_at DESC);
 
     CREATE TABLE IF NOT EXISTS moderation_logs (
       id TEXT PRIMARY KEY,
@@ -212,6 +226,12 @@ export async function initDatabase() {
     if (!String(error.message).includes("duplicate column")) throw error;
   }
 
+  try {
+    db.exec("ALTER TABLE accounts ADD COLUMN email_verified INTEGER NOT NULL DEFAULT 1");
+  } catch (error) {
+    if (!String(error.message).includes("duplicate column")) throw error;
+  }
+
   db.exec(
     "CREATE UNIQUE INDEX IF NOT EXISTS accounts_email_unique_idx ON accounts(email) WHERE email <> ''"
   );
@@ -262,6 +282,7 @@ export async function getAccountByNickname(nickname) {
       SELECT nickname, display_name AS displayName, password_hash AS passwordHash, salt, role, active,
         bio, avatar_url AS avatarUrl,
         private_messages_enabled AS privateMessagesEnabled, email,
+        email_verified AS emailVerified,
         created_at AS createdAt
       FROM accounts
       WHERE nickname = ?
@@ -275,6 +296,7 @@ export async function getAccountByEmail(email) {
       SELECT nickname, display_name AS displayName, password_hash AS passwordHash, salt, role, active,
         bio, avatar_url AS avatarUrl,
         private_messages_enabled AS privateMessagesEnabled, email,
+        email_verified AS emailVerified,
         created_at AS createdAt
       FROM accounts
       WHERE email = ?
@@ -621,9 +643,10 @@ export async function updateContactMessageStatus(id, status, handledBy) {
 export async function createAccount(account) {
   db.prepare(`
     INSERT INTO accounts (
-      nickname, display_name, password_hash, salt, role, active, email, created_at
+      nickname, display_name, password_hash, salt, role, active, email,
+      email_verified, created_at
     )
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
     account.nickname,
     account.displayName,
@@ -632,6 +655,7 @@ export async function createAccount(account) {
     account.role,
     1,
     account.email || "",
+    account.emailVerified ? 1 : 0,
     Date.now()
   );
 }
@@ -663,14 +687,72 @@ export async function updateAccountProfile(nickname, profile) {
 export async function updateAccountSettings(nickname, settings) {
   db.prepare(`
     UPDATE accounts
-    SET display_name = ?, private_messages_enabled = ?, email = ?
+    SET display_name = ?, private_messages_enabled = ?, email = ?, email_verified = ?
     WHERE nickname = ?
   `).run(
     settings.displayName,
     settings.privateMessagesEnabled ? 1 : 0,
     settings.email,
+    settings.emailVerified ? 1 : 0,
     nickname
   );
+}
+
+export async function createEmailVerificationToken(token) {
+  db.exec("BEGIN");
+  try {
+    db.prepare(`
+      DELETE FROM email_verification_tokens
+      WHERE expires_at < ? OR account_nickname = ?
+    `).run(Date.now(), token.accountNickname);
+    db.prepare(`
+      INSERT INTO email_verification_tokens (
+        token_hash, account_nickname, email, expires_at, used_at, created_at
+      )
+      VALUES (?, ?, ?, ?, NULL, ?)
+    `).run(
+      token.tokenHash,
+      token.accountNickname,
+      token.email,
+      token.expiresAt,
+      token.createdAt
+    );
+    db.exec("COMMIT");
+  } catch (error) {
+    db.exec("ROLLBACK");
+    throw error;
+  }
+}
+
+export async function getEmailVerificationToken(tokenHash) {
+  return db
+    .prepare(`
+      SELECT token_hash AS tokenHash, account_nickname AS accountNickname, email,
+        expires_at AS expiresAt, used_at AS usedAt, created_at AS createdAt
+      FROM email_verification_tokens
+      WHERE token_hash = ?
+    `)
+    .get(tokenHash);
+}
+
+export async function markEmailVerificationTokenUsed(tokenHash, usedAt) {
+  db.prepare(`
+    UPDATE email_verification_tokens
+    SET used_at = ?
+    WHERE token_hash = ? AND used_at IS NULL
+  `).run(usedAt, tokenHash);
+}
+
+export async function setAccountEmailVerified(nickname, verified) {
+  db.prepare("UPDATE accounts SET email_verified = ? WHERE nickname = ?").run(
+    verified ? 1 : 0,
+    nickname
+  );
+}
+
+export async function clearAccountEmailTokens(nickname) {
+  db.prepare("DELETE FROM password_reset_tokens WHERE account_nickname = ?").run(nickname);
+  db.prepare("DELETE FROM email_verification_tokens WHERE account_nickname = ?").run(nickname);
 }
 
 export async function createPasswordResetToken(token) {
@@ -745,6 +827,7 @@ export async function deleteAccount(nickname) {
     }
     db.prepare("DELETE FROM reports WHERE reporter = ?").run(nickname);
     db.prepare("DELETE FROM password_reset_tokens WHERE account_nickname = ?").run(nickname);
+    db.prepare("DELETE FROM email_verification_tokens WHERE account_nickname = ?").run(nickname);
     db.prepare("DELETE FROM message_favorites WHERE account_nickname = ?").run(nickname);
     db.prepare("DELETE FROM private_blocks WHERE blocker = ? OR blocked = ?").run(
       nickname,

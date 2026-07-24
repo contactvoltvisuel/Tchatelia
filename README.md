@@ -42,6 +42,7 @@ Prerequis : Node.js 24 ou plus recent.
   et journal de securite reserve aux administrateurs.
 - Verification anti-robot Cloudflare Turnstile activable gratuitement.
 - Recuperation du mot de passe par e-mail avec un lien unique valable 30 minutes.
+- Verification des nouvelles adresses e-mail avec un lien unique valable 24 heures.
 - Commandes simples : `/me texte`, `/clear` et `/help`.
 
 ## Architecture simple
@@ -126,10 +127,11 @@ TURNSTILE_SECRET_KEY=
 
 Ne jamais publier `SECURITY_HASH_SECRET` ou `TURNSTILE_SECRET_KEY` sur GitHub.
 
-## Recuperation du mot de passe
+## E-mails de compte
 
-La recuperation utilise l'envoi transactionnel Brevo. Creer une cle API Brevo et verifier
-l'adresse d'expedition, puis ajouter ces variables dans Render :
+La verification des adresses et la recuperation du mot de passe utilisent l'envoi transactionnel
+Brevo. Creer une cle API Brevo et verifier l'adresse d'expedition, puis ajouter ces variables dans
+Render :
 
 ```text
 PUBLIC_URL=https://tchatelia.onrender.com
@@ -138,9 +140,10 @@ MAIL_FROM_EMAIL=adresse-verifiee@example.com
 MAIL_FROM_NAME=Tchatelia
 ```
 
-`BREVO_API_KEY` doit rester secrete et ne doit jamais etre ajoutee dans GitHub. Les comptes
-existants peuvent renseigner leur adresse dans `Parametres`. Une adresse e-mail est obligatoire
-pour les nouvelles inscriptions.
+`BREVO_API_KEY` doit rester secrete et ne doit jamais etre ajoutee dans GitHub. Une adresse e-mail
+est obligatoire pour les nouvelles inscriptions. Le compte devient utilisable apres le clic sur le
+lien de verification valable 24 heures. Les comptes deja crees avant cette fonctionnalite restent
+valides. Un changement d'adresse depuis `Parametres` demande une nouvelle verification.
 
 Il est aussi possible de le changer au lancement :
 

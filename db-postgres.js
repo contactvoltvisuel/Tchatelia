@@ -60,6 +60,7 @@ export async function initDatabase() {
       avatar_url TEXT NOT NULL DEFAULT '',
       private_messages_enabled BOOLEAN NOT NULL DEFAULT TRUE,
       email TEXT NOT NULL DEFAULT '',
+      email_verified BOOLEAN NOT NULL DEFAULT FALSE,
       created_at BIGINT NOT NULL
     );
 
@@ -83,6 +84,18 @@ export async function initDatabase() {
 
     CREATE INDEX IF NOT EXISTS password_reset_account_idx
       ON password_reset_tokens (account_nickname, created_at DESC);
+
+    CREATE TABLE IF NOT EXISTS email_verification_tokens (
+      token_hash TEXT PRIMARY KEY,
+      account_nickname TEXT NOT NULL REFERENCES accounts(nickname) ON DELETE CASCADE,
+      email TEXT NOT NULL,
+      expires_at BIGINT NOT NULL,
+      used_at BIGINT,
+      created_at BIGINT NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS email_verification_account_idx
+      ON email_verification_tokens (account_nickname, created_at DESC);
 
     CREATE TABLE IF NOT EXISTS moderation_logs (
       id TEXT PRIMARY KEY,
@@ -175,6 +188,10 @@ export async function initDatabase() {
   );
   await pool.query("ALTER TABLE accounts ADD COLUMN IF NOT EXISTS email TEXT NOT NULL DEFAULT ''");
   await pool.query(
+    "ALTER TABLE accounts ADD COLUMN IF NOT EXISTS email_verified BOOLEAN NOT NULL DEFAULT TRUE"
+  );
+  await pool.query("ALTER TABLE accounts ALTER COLUMN email_verified SET DEFAULT FALSE");
+  await pool.query(
     "CREATE UNIQUE INDEX IF NOT EXISTS accounts_email_unique_idx ON accounts(email) WHERE email <> ''"
   );
   await pool.query("ALTER TABLE messages ADD COLUMN IF NOT EXISTS author_id TEXT NOT NULL DEFAULT ''");
@@ -224,6 +241,7 @@ export async function getAccountByNickname(nickname) {
       SELECT nickname, display_name AS "displayName", password_hash AS "passwordHash", salt, role, active,
         bio, avatar_url AS "avatarUrl",
         private_messages_enabled AS "privateMessagesEnabled", email,
+        email_verified AS "emailVerified",
         created_at AS "createdAt"
       FROM accounts
       WHERE nickname = $1
@@ -239,6 +257,7 @@ export async function getAccountByEmail(email) {
       SELECT nickname, display_name AS "displayName", password_hash AS "passwordHash", salt, role, active,
         bio, avatar_url AS "avatarUrl",
         private_messages_enabled AS "privateMessagesEnabled", email,
+        email_verified AS "emailVerified",
         created_at AS "createdAt"
       FROM accounts
       WHERE email = $1
@@ -631,9 +650,10 @@ export async function createAccount(account) {
   await pool.query(
     `
       INSERT INTO accounts (
-        nickname, display_name, password_hash, salt, role, active, email, created_at
+        nickname, display_name, password_hash, salt, role, active, email,
+        email_verified, created_at
       )
-      VALUES ($1, $2, $3, $4, $5, TRUE, $6, $7)
+      VALUES ($1, $2, $3, $4, $5, TRUE, $6, $7, $8)
     `,
     [
       account.nickname,
@@ -642,6 +662,7 @@ export async function createAccount(account) {
       account.salt,
       account.role,
       account.email || "",
+      Boolean(account.emailVerified),
       Date.now(),
     ]
   );
@@ -675,11 +696,88 @@ export async function updateAccountSettings(nickname, settings) {
   await pool.query(
     `
       UPDATE accounts
-      SET display_name = $1, private_messages_enabled = $2, email = $3
-      WHERE nickname = $4
+      SET display_name = $1, private_messages_enabled = $2, email = $3,
+        email_verified = $4
+      WHERE nickname = $5
     `,
-    [settings.displayName, settings.privateMessagesEnabled, settings.email, nickname]
+    [
+      settings.displayName,
+      settings.privateMessagesEnabled,
+      settings.email,
+      settings.emailVerified,
+      nickname,
+    ]
   );
+}
+
+export async function createEmailVerificationToken(token) {
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    await client.query(
+      "DELETE FROM email_verification_tokens WHERE expires_at < $1 OR account_nickname = $2",
+      [Date.now(), token.accountNickname]
+    );
+    await client.query(
+      `
+        INSERT INTO email_verification_tokens (
+          token_hash, account_nickname, email, expires_at, used_at, created_at
+        )
+        VALUES ($1, $2, $3, $4, NULL, $5)
+      `,
+      [
+        token.tokenHash,
+        token.accountNickname,
+        token.email,
+        token.expiresAt,
+        token.createdAt,
+      ]
+    );
+    await client.query("COMMIT");
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+export async function getEmailVerificationToken(tokenHash) {
+  const result = await pool.query(
+    `
+      SELECT token_hash AS "tokenHash", account_nickname AS "accountNickname", email,
+        expires_at AS "expiresAt", used_at AS "usedAt", created_at AS "createdAt"
+      FROM email_verification_tokens
+      WHERE token_hash = $1
+    `,
+    [tokenHash]
+  );
+  return result.rows[0];
+}
+
+export async function markEmailVerificationTokenUsed(tokenHash, usedAt) {
+  await pool.query(
+    `
+      UPDATE email_verification_tokens
+      SET used_at = $1
+      WHERE token_hash = $2 AND used_at IS NULL
+    `,
+    [usedAt, tokenHash]
+  );
+}
+
+export async function setAccountEmailVerified(nickname, verified) {
+  await pool.query("UPDATE accounts SET email_verified = $1 WHERE nickname = $2", [
+    verified,
+    nickname,
+  ]);
+}
+
+export async function clearAccountEmailTokens(nickname) {
+  await pool.query("DELETE FROM password_reset_tokens WHERE account_nickname = $1", [nickname]);
+  await pool.query("DELETE FROM email_verification_tokens WHERE account_nickname = $1", [
+    nickname,
+  ]);
 }
 
 export async function createPasswordResetToken(token) {
@@ -768,6 +866,9 @@ export async function deleteAccount(nickname) {
     }
     await client.query("DELETE FROM reports WHERE reporter = $1", [nickname]);
     await client.query("DELETE FROM password_reset_tokens WHERE account_nickname = $1", [
+      nickname,
+    ]);
+    await client.query("DELETE FROM email_verification_tokens WHERE account_nickname = $1", [
       nickname,
     ]);
     await client.query("DELETE FROM message_favorites WHERE account_nickname = $1", [nickname]);

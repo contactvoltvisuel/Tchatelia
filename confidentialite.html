@@ -40,7 +40,10 @@
       <section>
         <h2>2. Donnees traitees</h2>
         <ul>
-          <li>Compte : pseudo, empreinte securisee du mot de passe, role, statut et date de creation.</li>
+          <li>
+            Compte : pseudo, adresse e-mail, etat de verification, empreinte securisee du mot de
+            passe, role, statut et date de creation.
+          </li>
           <li>Profil : description et photo choisies par l'utilisateur.</li>
           <li>Chat : messages publics, messages prives et informations de salon.</li>
           <li>Reactions : choix du compte associe a chaque reaction sur un message public.</li>
@@ -109,8 +112,8 @@
           </li>
           <li>Les demandes de contact et leurs adresses e-mail sont reservees aux administrateurs.</li>
           <li>
-            L'adresse e-mail d'un compte n'est pas publique. Elle est utilisee pour envoyer les liens
-            de recuperation par le service transactionnel Brevo.
+            L'adresse e-mail d'un compte n'est pas publique. Elle est utilisee pour confirmer
+            l'adresse et envoyer les liens de recuperation par le service transactionnel Brevo.
           </li>
           <li>Le journal de securite pseudonymise est reserve aux administrateurs.</li>
           <li>
@@ -121,7 +124,10 @@
             Si la verification anti-robot est activee, Cloudflare Turnstile traite les informations
             techniques necessaires a cette verification.
           </li>
-          <li>Brevo traite l'adresse necessaire a l'envoi d'un e-mail de recuperation.</li>
+          <li>
+            Brevo traite l'adresse necessaire a l'envoi des e-mails de verification et de
+            recuperation.
+          </li>
         </ul>
       </section>
 

@@ -2879,6 +2879,27 @@ button.message-reaction:hover,
   font-weight: 700;
 }
 
+.email-verification-content {
+  display: grid;
+  gap: 12px;
+}
+
+.email-verification-content p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.email-verification-content strong {
+  overflow-wrap: anywhere;
+  color: var(--ink);
+}
+
+.email-verification-content button {
+  justify-self: start;
+}
+
 .settings-header {
   padding-right: 40px;
 }
@@ -2923,6 +2944,28 @@ button.message-reaction:hover,
 .settings-section > button[type="submit"] {
   justify-self: start;
   margin-top: 4px;
+}
+
+.email-verification-state {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: -2px 0 8px;
+}
+
+.email-verification-state span {
+  color: #a23818;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.email-verification-state span.is-verified {
+  color: var(--accent-dark);
+}
+
+.email-verification-state button {
+  flex: 0 0 auto;
 }
 
 .settings-toggle {

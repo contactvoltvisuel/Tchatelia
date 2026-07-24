@@ -125,6 +125,12 @@ const settingsAccountNickname = document.querySelector("#settingsAccountNickname
 const settingsGeneralForm = document.querySelector("#settingsGeneralForm");
 const settingsDisplayName = document.querySelector("#settingsDisplayName");
 const settingsEmail = document.querySelector("#settingsEmail");
+const settingsEmailVerificationState = document.querySelector(
+  "#settingsEmailVerificationState"
+);
+const settingsResendVerificationButton = document.querySelector(
+  "#settingsResendVerificationButton"
+);
 const settingsNotifications = document.querySelector("#settingsNotifications");
 const settingsPrivateMessages = document.querySelector("#settingsPrivateMessages");
 const settingsGeneralStatus = document.querySelector("#settingsGeneralStatus");
@@ -148,6 +154,17 @@ const passwordResetConfirmForm = document.querySelector("#passwordResetConfirmFo
 const passwordResetNewPassword = document.querySelector("#passwordResetNewPassword");
 const passwordResetConfirmPassword = document.querySelector("#passwordResetConfirmPassword");
 const passwordResetStatus = document.querySelector("#passwordResetStatus");
+const emailVerificationDialog = document.querySelector("#emailVerificationDialog");
+const emailVerificationCloseButton = document.querySelector(
+  "#emailVerificationCloseButton"
+);
+const emailVerificationTitle = document.querySelector("#emailVerificationTitle");
+const emailVerificationMessage = document.querySelector("#emailVerificationMessage");
+const emailVerificationAddress = document.querySelector("#emailVerificationAddress");
+const emailVerificationResendButton = document.querySelector(
+  "#emailVerificationResendButton"
+);
+const emailVerificationStatus = document.querySelector("#emailVerificationStatus");
 
 let currentRoom = "accueil";
 let currentNickname = "";
@@ -181,7 +198,9 @@ let messageSearchResults = [];
 let messageSearchIndex = -1;
 let favoritesOnly = false;
 let passwordResetEnabled = false;
+let emailVerificationEnabled = false;
 let activePasswordResetToken = "";
+let activeVerificationEmail = "";
 const currentRoomMessages = new Map();
 const PRESENCE_LABELS = {
   online: "En ligne",
@@ -203,6 +222,7 @@ const unreadByRoom = new Map();
 initializePublicProtection();
 updateAuthModeRequirements();
 openPasswordResetConfirmationFromUrl();
+openEmailVerificationFromUrl();
 
 authModeInputs.forEach((input) => {
   input.addEventListener("change", updateAuthModeRequirements);
@@ -230,6 +250,13 @@ loginForm.addEventListener("submit", (event) => {
       if (!response.ok) {
         currentAccount = false;
         resetTurnstile();
+        if (response.verificationRequired) {
+          openEmailVerificationDialog({
+            email: response.email,
+            message: response.message,
+          });
+          return;
+        }
         alert(response.error || "Impossible d'entrer dans le chat.");
         return;
       }
@@ -410,6 +437,26 @@ passwordResetConfirmForm.addEventListener("submit", (event) => {
   );
 });
 
+emailVerificationCloseButton.addEventListener("click", () => {
+  emailVerificationDialog.close();
+});
+
+emailVerificationDialog.addEventListener("click", (event) => {
+  if (event.target === emailVerificationDialog) emailVerificationDialog.close();
+});
+
+emailVerificationResendButton.addEventListener("click", () => {
+  requestEmailVerification(activeVerificationEmail);
+});
+
+settingsResendVerificationButton.addEventListener("click", () => {
+  openEmailVerificationDialog({
+    email: settingsEmail.value,
+    message: "Un nouveau lien va etre envoye a cette adresse.",
+  });
+  requestEmailVerification(settingsEmail.value);
+});
+
 presenceSelect.addEventListener("change", () => {
   const previousStatus = currentPresenceStatus;
   const status = presenceSelect.value;
@@ -535,7 +582,10 @@ settingsGeneralForm.addEventListener("submit", async (event) => {
         return;
       }
       renderAccountSettings(response.settings);
-      setSettingsStatus(settingsGeneralStatus, "Preferences enregistrees.");
+      setSettingsStatus(
+        settingsGeneralStatus,
+        response.message || "Preferences enregistrees."
+      );
     }
   );
 });
@@ -1006,6 +1056,22 @@ socket.on("account-updated", ({ nickname }) => {
   currentNickname = nickname;
   updateCurrentUserSummary();
   if (settingsDialog.open) settingsDisplayName.value = nickname;
+});
+
+socket.on("email-verified", ({ email }) => {
+  if (emailVerificationDialog.open) {
+    emailVerificationTitle.textContent = "Adresse e-mail verifiee";
+    emailVerificationMessage.textContent =
+      "Ton adresse est confirmee. La recuperation du mot de passe est active.";
+    emailVerificationAddress.textContent = email || activeVerificationEmail;
+    emailVerificationResendButton.classList.add("hidden");
+    setSettingsStatus(emailVerificationStatus, "Verification terminee.");
+  }
+  if (settingsDialog.open) {
+    socket.emit("settings-action", { action: "get" }, (response) => {
+      if (response?.ok) renderAccountSettings(response.settings);
+    });
+  }
 });
 
 socket.on("account-deleted", () => {
@@ -1744,6 +1810,17 @@ function renderAccountSettings(settings) {
   settingsAccountNickname.textContent = settings.accountNickname;
   settingsDisplayName.value = settings.displayName;
   settingsEmail.value = settings.email || "";
+  settingsEmailVerificationState.textContent = settings.emailVerified
+    ? "Adresse verifiee"
+    : "Adresse a verifier";
+  settingsEmailVerificationState.classList.toggle(
+    "is-verified",
+    Boolean(settings.emailVerified)
+  );
+  settingsResendVerificationButton.classList.toggle(
+    "hidden",
+    Boolean(settings.emailVerified) || !emailVerificationEnabled
+  );
   settingsNotifications.checked = alertsEnabled;
   settingsPrivateMessages.checked = settings.privateMessagesEnabled;
   settingsBlockedList.innerHTML = "";
@@ -2124,6 +2201,7 @@ async function initializePublicProtection() {
     if (!response.ok) return;
     const config = await response.json();
     passwordResetEnabled = Boolean(config.passwordResetEnabled);
+    emailVerificationEnabled = Boolean(config.emailVerificationEnabled);
     updateAuthModeRequirements();
     if (!config.turnstileEnabled || !config.turnstileSiteKey) return;
 
@@ -2159,6 +2237,74 @@ function openPasswordResetConfirmationFromUrl() {
   setSettingsStatus(passwordResetStatus, "");
   if (!passwordResetDialog.open) passwordResetDialog.showModal();
   passwordResetNewPassword.focus();
+}
+
+function openEmailVerificationDialog({ email = "", message = "" } = {}) {
+  activeVerificationEmail = String(email || "").trim();
+  emailVerificationTitle.textContent = "Confirme ton adresse e-mail";
+  emailVerificationMessage.textContent =
+    message || "Consulte ta boite de reception et clique sur le lien de confirmation.";
+  emailVerificationAddress.textContent = activeVerificationEmail;
+  emailVerificationResendButton.classList.toggle(
+    "hidden",
+    !emailVerificationEnabled || !activeVerificationEmail
+  );
+  setSettingsStatus(emailVerificationStatus, "");
+  if (!emailVerificationDialog.open) emailVerificationDialog.showModal();
+}
+
+function requestEmailVerification(email) {
+  const cleanEmail = String(email || "").trim();
+  if (!cleanEmail) return;
+  activeVerificationEmail = cleanEmail;
+  emailVerificationResendButton.disabled = true;
+  setSettingsStatus(emailVerificationStatus, "Envoi en cours...");
+  socket.emit(
+    "email-verification-request",
+    { email: cleanEmail },
+    (response) => {
+      emailVerificationResendButton.disabled = false;
+      setSettingsStatus(
+        emailVerificationStatus,
+        response?.message || response?.error || "L'e-mail n'a pas pu etre envoye.",
+        !response?.ok
+      );
+    }
+  );
+}
+
+function openEmailVerificationFromUrl() {
+  const token = new URLSearchParams(window.location.search).get("verifyEmail") || "";
+  if (!/^[a-f0-9]{64}$/i.test(token)) return;
+
+  activeVerificationEmail = "";
+  emailVerificationTitle.textContent = "Verification de l'adresse";
+  emailVerificationMessage.textContent = "Nous verifions ton lien de confirmation.";
+  emailVerificationAddress.textContent = "";
+  emailVerificationResendButton.classList.add("hidden");
+  setSettingsStatus(emailVerificationStatus, "Verification en cours...");
+  if (!emailVerificationDialog.open) emailVerificationDialog.showModal();
+
+  socket.emit(
+    "email-verification-confirm",
+    { token },
+    (response) => {
+      emailVerificationTitle.textContent = response?.ok
+        ? "Adresse e-mail verifiee"
+        : "Lien de verification invalide";
+      emailVerificationMessage.textContent = response?.ok
+        ? "Ton compte est maintenant confirme. Tu peux te connecter."
+        : "Demande un nouveau lien depuis l'ecran de connexion.";
+      setSettingsStatus(
+        emailVerificationStatus,
+        response?.message || response?.error || "La verification a echoue.",
+        !response?.ok
+      );
+      if (response?.ok) {
+        window.history.replaceState({}, document.title, window.location.pathname);
+      }
+    }
+  );
 }
 
 function loadTurnstileScript() {

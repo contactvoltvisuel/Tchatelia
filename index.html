@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Tchatelia</title>
     <link rel="icon" href="data:," />
-    <link rel="stylesheet" href="/styles.css?v=20260724-5" />
+    <link rel="stylesheet" href="/styles.css?v=20260724-6" />
   </head>
   <body>
     <main class="shell">
@@ -587,6 +587,16 @@
             autocomplete="email"
             required
           />
+          <div class="email-verification-state">
+            <span id="settingsEmailVerificationState">Adresse a verifier</span>
+            <button
+              class="profile-remove-avatar"
+              id="settingsResendVerificationButton"
+              type="button"
+            >
+              Renvoyer l'e-mail
+            </button>
+          </div>
           <label class="settings-toggle">
             <span>
               <strong>Notifications</strong>
@@ -713,6 +723,31 @@
       <p class="settings-status" id="passwordResetStatus" role="status"></p>
     </dialog>
 
+    <dialog class="password-reset-dialog" id="emailVerificationDialog">
+      <button
+        class="profile-close-button"
+        id="emailVerificationCloseButton"
+        type="button"
+        aria-label="Fermer"
+      >
+        X
+      </button>
+      <div class="password-reset-copy">
+        <p class="eyebrow">Compte Tchatelia</p>
+        <h2 id="emailVerificationTitle">Confirme ton adresse e-mail</h2>
+      </div>
+      <div class="email-verification-content">
+        <p id="emailVerificationMessage">
+          Consulte ta boite de reception et clique sur le lien de confirmation.
+        </p>
+        <strong id="emailVerificationAddress"></strong>
+        <button id="emailVerificationResendButton" type="button">
+          Renvoyer l'e-mail
+        </button>
+        <p class="settings-status" id="emailVerificationStatus" role="status"></p>
+      </div>
+    </dialog>
+
     <dialog class="private-dialog" id="privateDialog">
       <button class="profile-close-button" id="privateCloseButton" type="button" aria-label="Fermer">
         X
@@ -779,6 +814,6 @@
     </dialog>
 
     <script src="/socket.io/socket.io.js"></script>
-    <script src="/app.js?v=20260724-5"></script>
+    <script src="/app.js?v=20260724-6"></script>
   </body>
 </html>

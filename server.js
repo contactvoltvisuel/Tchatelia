@@ -16,8 +16,10 @@ import { fileURLToPath } from "node:url";
 import { Server } from "socket.io";
 import {
   banNickname,
+  clearAccountEmailTokens,
   createContactMessage,
   createAccount,
+  createEmailVerificationToken,
   createPasswordResetToken,
   createReport,
   createRoom,
@@ -32,6 +34,7 @@ import {
   getPrivateBlockState,
   getPrivateConversation,
   getPrivateMessageById,
+  getEmailVerificationToken,
   getPasswordResetToken,
   getReportById,
   getRoomHistory,
@@ -48,12 +51,14 @@ import {
   listReports,
   listSecurityEvents,
   markPrivateMessagesRead,
+  markEmailVerificationTokenUsed,
   markPasswordResetTokenUsed,
   savePrivateMessage,
   saveMessage,
   saveModerationLog,
   saveSecurityEvent,
   setAccountActive,
+  setAccountEmailVerified,
   setPrivateBlock,
   setMessageFavorite,
   setPinnedMessage,
@@ -106,9 +111,12 @@ const PUBLIC_URL = String(process.env.PUBLIC_URL || "").trim().replace(/\/+$/, "
 const PASSWORD_RESET_ENABLED = Boolean(
   BREVO_API_KEY && isValidEmail(MAIL_FROM_EMAIL)
 );
+const EMAIL_VERIFICATION_ENABLED = PASSWORD_RESET_ENABLED;
 const PASSWORD_RESET_TTL_MS = 30 * 60_000;
+const EMAIL_VERIFICATION_TTL_MS = 24 * 60 * 60_000;
 const PASSWORD_RESET_WINDOW_MS = 60 * 60_000;
 const MAX_PASSWORD_RESET_REQUESTS = 3;
+const MAX_EMAIL_VERIFICATION_REQUESTS = 3;
 const SECURITY_HASH_SECRET =
   process.env.SECURITY_HASH_SECRET || ADMIN_PASSWORD || "tchatelia-security";
 const AUTH_WINDOW_MS = 10 * 60_000;
@@ -121,6 +129,7 @@ const MAX_CONNECTIONS_PER_IDENTITY = 8;
 const contactRateLimits = new Map();
 const protectionStates = new Map();
 const passwordResetRateLimits = new Map();
+const emailVerificationRateLimits = new Map();
 
 await initDatabase();
 
@@ -173,6 +182,7 @@ app.get("/api/public-config", (request, response) => {
     turnstileEnabled: TURNSTILE_ENABLED,
     turnstileSiteKey: TURNSTILE_ENABLED ? TURNSTILE_SITE_KEY : "",
     passwordResetEnabled: PASSWORD_RESET_ENABLED,
+    emailVerificationEnabled: EMAIL_VERIFICATION_ENABLED,
   });
 });
 
@@ -266,6 +276,93 @@ app.post("/api/contact", async (request, response) => {
 });
 
 io.on("connection", (socket) => {
+  socket.on("email-verification-request", async (payload = {}, callback) => {
+    if (!EMAIL_VERIFICATION_ENABLED) {
+      callback?.({
+        ok: false,
+        error: "La verification par e-mail n'est pas encore configuree.",
+      });
+      return;
+    }
+
+    const identity = getSecurityIdentity(socket);
+    if (!canRequestEmailVerification(identity.hash)) {
+      callback?.({
+        ok: false,
+        error: "Trop de demandes. Reessaie dans une heure.",
+      });
+      return;
+    }
+
+    const email = normalizeEmail(payload.email);
+    if (!isValidEmail(email)) {
+      callback?.({ ok: false, error: "Saisis une adresse e-mail valide." });
+      return;
+    }
+
+    const genericResponse = {
+      ok: true,
+      message: "Si cette adresse doit etre verifiee, un nouvel e-mail vient d'etre envoye.",
+    };
+
+    try {
+      const account = await getAccountByEmail(email);
+      if (account && !account.emailVerified) {
+        await issueEmailVerification(account, socket);
+      }
+      callback?.(genericResponse);
+    } catch (error) {
+      console.error("Erreur verification de l'e-mail:", error.message);
+      callback?.(genericResponse);
+    }
+  });
+
+  socket.on("email-verification-confirm", async (payload = {}, callback) => {
+    const token = String(payload.token || "").trim();
+    if (!/^[a-f0-9]{64}$/i.test(token)) {
+      callback?.({ ok: false, error: "Ce lien de verification est invalide." });
+      return;
+    }
+
+    try {
+      const tokenRecord = await getEmailVerificationToken(hashResetToken(token));
+      if (
+        !tokenRecord ||
+        tokenRecord.usedAt ||
+        Number(tokenRecord.expiresAt) < Date.now()
+      ) {
+        callback?.({
+          ok: false,
+          error: "Ce lien est expire ou a deja ete utilise.",
+        });
+        return;
+      }
+
+      const account = await getAccountByNickname(tokenRecord.accountNickname);
+      if (!account || normalizeEmail(account.email) !== normalizeEmail(tokenRecord.email)) {
+        callback?.({
+          ok: false,
+          error: "Cette adresse n'est plus associee au compte.",
+        });
+        return;
+      }
+
+      await setAccountEmailVerified(account.nickname, true);
+      await markEmailVerificationTokenUsed(tokenRecord.tokenHash, Date.now());
+      emitToAccount(account.nickname, "email-verified", { email: account.email });
+      callback?.({
+        ok: true,
+        message: "Adresse e-mail verifiee. Tu peux maintenant te connecter.",
+      });
+    } catch (error) {
+      console.error("Erreur confirmation de l'e-mail:", error.message);
+      callback?.({
+        ok: false,
+        error: "L'adresse n'a pas pu etre verifiee. Reessaie plus tard.",
+      });
+    }
+  });
+
   socket.on("password-reset-request", async (payload = {}, callback) => {
     if (!PASSWORD_RESET_ENABLED) {
       callback?.({
@@ -297,7 +394,7 @@ io.on("connection", (socket) => {
 
     try {
       const account = await getAccountByEmail(email);
-      if (account) {
+      if (account?.emailVerified) {
         const rawToken = randomBytes(32).toString("hex");
         const createdAt = Date.now();
         await createPasswordResetToken({
@@ -387,6 +484,7 @@ io.on("connection", (socket) => {
     const cleanAccountPassword = String(accountPassword || "");
     const cleanAccountEmail = normalizeEmail(accountEmail);
     const securityIdentity = getSecurityIdentity(socket);
+    let registeredNow = false;
 
     if (legalAccepted !== true) {
       callback?.({
@@ -483,7 +581,9 @@ io.on("connection", (socket) => {
         salt: passwordRecord.salt,
         role: isAdmin ? "admin" : "user",
         email: cleanAccountEmail,
+        emailVerified: !EMAIL_VERIFICATION_ENABLED,
       });
+      registeredNow = true;
     }
 
     const account = await findAccountByIdentity(cleanNickname);
@@ -529,6 +629,30 @@ io.on("connection", (socket) => {
       callback?.({
         ok: false,
         error: "Aucun compte n'existe avec ce pseudo.",
+      });
+      return;
+    }
+
+    if (account && EMAIL_VERIFICATION_ENABLED && !account.emailVerified) {
+      let verificationMessage =
+        "Verifie ton adresse e-mail avant de te connecter.";
+      if (registeredNow) {
+        registerSuccessfulAccess(securityIdentity.hash, cleanAuthMode);
+        try {
+          await issueEmailVerification(account, socket);
+          verificationMessage =
+            "Ton compte est cree. Consulte ton e-mail pour confirmer ton adresse.";
+        } catch (error) {
+          console.error("Erreur e-mail apres inscription:", error.message);
+          verificationMessage =
+            "Ton compte est cree, mais l'e-mail n'a pas pu etre envoye. Utilise le bouton Renvoyer.";
+        }
+      }
+      callback?.({
+        ok: false,
+        verificationRequired: true,
+        email: account.email,
+        message: verificationMessage,
       });
       return;
     }
@@ -1235,7 +1359,23 @@ function canRequestPasswordReset(identityHash) {
   return true;
 }
 
-function buildPasswordResetUrl(socket, token) {
+function canRequestEmailVerification(identityHash) {
+  const now = Date.now();
+  const recentRequests = keepRecent(
+    emailVerificationRateLimits.get(identityHash) || [],
+    PASSWORD_RESET_WINDOW_MS,
+    now
+  );
+  if (recentRequests.length >= MAX_EMAIL_VERIFICATION_REQUESTS) {
+    emailVerificationRateLimits.set(identityHash, recentRequests);
+    return false;
+  }
+  recentRequests.push(now);
+  emailVerificationRateLimits.set(identityHash, recentRequests);
+  return true;
+}
+
+function getPublicBaseUrl(socket) {
   let baseUrl = PUBLIC_URL;
   if (!/^https?:\/\/[^/]+/i.test(baseUrl)) {
     const origin = String(socket.handshake.headers.origin || "").replace(/\/+$/, "");
@@ -1249,10 +1389,58 @@ function buildPasswordResetUrl(socket, token) {
       baseUrl = `${protocol}://${host}`;
     }
   }
-  return `${baseUrl}/?resetToken=${encodeURIComponent(token)}`;
+  return baseUrl;
+}
+
+function buildPasswordResetUrl(socket, token) {
+  return `${getPublicBaseUrl(socket)}/?resetToken=${encodeURIComponent(token)}`;
+}
+
+function buildEmailVerificationUrl(socket, token) {
+  return `${getPublicBaseUrl(socket)}/?verifyEmail=${encodeURIComponent(token)}`;
+}
+
+async function issueEmailVerification(account, socket) {
+  const rawToken = randomBytes(32).toString("hex");
+  const createdAt = Date.now();
+  await createEmailVerificationToken({
+    tokenHash: hashResetToken(rawToken),
+    accountNickname: account.nickname,
+    email: account.email,
+    expiresAt: createdAt + EMAIL_VERIFICATION_TTL_MS,
+    createdAt,
+  });
+  await sendEmailVerification(
+    account,
+    buildEmailVerificationUrl(socket, rawToken)
+  );
 }
 
 async function sendPasswordResetEmail(account, resetUrl) {
+  await sendTransactionalEmail({
+    account,
+    subject: "Reinitialisation de ton mot de passe Tchatelia",
+    textContent:
+      `Bonjour ${account.displayName},\n\n` +
+      "Une demande de reinitialisation a ete faite pour ton compte Tchatelia.\n\n" +
+      `Choisis un nouveau mot de passe avec ce lien valable 30 minutes :\n${resetUrl}\n\n` +
+      "Si tu n'es pas a l'origine de cette demande, ignore simplement cet e-mail.",
+  });
+}
+
+async function sendEmailVerification(account, verificationUrl) {
+  await sendTransactionalEmail({
+    account,
+    subject: "Confirme ton adresse e-mail Tchatelia",
+    textContent:
+      `Bonjour ${account.displayName},\n\n` +
+      "Ton compte Tchatelia a bien ete cree.\n\n" +
+      `Confirme ton adresse avec ce lien valable 24 heures :\n${verificationUrl}\n\n` +
+      "Si tu n'es pas a l'origine de cette inscription, ignore simplement cet e-mail.",
+  });
+}
+
+async function sendTransactionalEmail({ account, subject, textContent }) {
   const response = await fetch("https://api.brevo.com/v3/smtp/email", {
     method: "POST",
     headers: {
@@ -1271,12 +1459,8 @@ async function sendPasswordResetEmail(account, resetUrl) {
           name: account.displayName,
         },
       ],
-      subject: "Reinitialisation de ton mot de passe Tchatelia",
-      textContent:
-        `Bonjour ${account.displayName},\n\n` +
-        "Une demande de reinitialisation a ete faite pour ton compte Tchatelia.\n\n" +
-        `Choisis un nouveau mot de passe avec ce lien valable 30 minutes :\n${resetUrl}\n\n` +
-        "Si tu n'es pas a l'origine de cette demande, ignore simplement cet e-mail.",
+      subject,
+      textContent,
     }),
   });
 
@@ -1602,6 +1786,7 @@ async function buildAccountSettings(accountNickname) {
     accountNickname: account.nickname,
     displayName: account.displayName,
     email: account.email || "",
+    emailVerified: Boolean(account.emailVerified),
     privateMessagesEnabled: Boolean(account.privateMessagesEnabled),
     blockedUsers: blockedUsers.map((blockedUser) => ({
       accountNickname: blockedUser.blocked,
@@ -1670,23 +1855,56 @@ async function handleSettingsAction(socket, user, payload, callback) {
       });
       return;
     }
+    const emailChanged = email !== normalizeEmail(account.email);
+    const emailVerified = emailChanged
+      ? !EMAIL_VERIFICATION_ENABLED
+      : Boolean(account.emailVerified);
+    if (emailChanged) {
+      await clearAccountEmailTokens(account.nickname);
+    }
     await updateAccountSettings(account.nickname, {
       displayName,
       privateMessagesEnabled,
       email,
+      emailVerified,
     });
     updateConnectedAccount(account.nickname, {
       nickname: displayName,
       privateMessagesEnabled,
+      emailVerified,
     });
     emitToAccount(account.nickname, "account-updated", {
       nickname: displayName,
       privateMessagesEnabled,
+      emailVerified,
     });
     for (const room of rooms.keys()) publishUsers(room);
     await publishAccountLists();
     await refreshPrivateStatesForConnectedAccounts();
-    callback?.({ ok: true, settings: await buildAccountSettings(account.nickname) });
+    let message = "Preferences enregistrees.";
+    if (emailChanged && EMAIL_VERIFICATION_ENABLED) {
+      try {
+        await issueEmailVerification(
+          {
+            ...account,
+            displayName,
+            email,
+            emailVerified: false,
+          },
+          socket
+        );
+        message = "Preferences enregistrees. Consulte ton e-mail pour confirmer la nouvelle adresse.";
+      } catch (error) {
+        console.error("Erreur verification apres changement d'e-mail:", error.message);
+        message =
+          "Preferences enregistrees, mais l'e-mail n'a pas pu etre envoye. Utilise Renvoyer.";
+      }
+    }
+    callback?.({
+      ok: true,
+      message,
+      settings: await buildAccountSettings(account.nickname),
+    });
     return;
   }
 
