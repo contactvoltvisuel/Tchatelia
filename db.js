@@ -48,6 +48,7 @@ export const {
   updateAccountRole,
   updateContactMessageStatus,
   updateMessageText,
+  updateMessageReactions,
   updateReportStatus,
   updateRoomTopic,
 } = database;

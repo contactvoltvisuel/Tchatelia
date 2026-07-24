@@ -56,6 +56,7 @@ import {
   updateAccountSettings,
   updateAccountRole,
   updateContactMessageStatus,
+  updateMessageReactions,
   updateMessageText,
   updateRoomTopic,
   updateReportStatus,
@@ -79,6 +80,12 @@ const SPAM_MAX_MESSAGES = 5;
 const SPAM_COOLDOWN_MS = 15_000;
 const DUPLICATE_COOLDOWN_MS = 8_000;
 const MODERATION_ROLES = new Set(["admin", "moderator"]);
+const MESSAGE_REACTIONS = new Map([
+  ["like", "\u{1F44D}"],
+  ["heart", "\u{2764}\u{FE0F}"],
+  ["laugh", "\u{1F602}"],
+  ["surprised", "\u{1F62E}"],
+]);
 const PUBLIC_PROTECTION_ENABLED = process.env.PUBLIC_PROTECTION !== "false";
 const TURNSTILE_SITE_KEY = String(process.env.TURNSTILE_SITE_KEY || "").trim();
 const TURNSTILE_SECRET_KEY = String(process.env.TURNSTILE_SECRET_KEY || "").trim();
@@ -411,6 +418,9 @@ io.on("connection", (socket) => {
       lastMessage: "",
       cooldownUntil: 0,
       lastReportAt: 0,
+      lastReactionAt: 0,
+      isTyping: false,
+      typingTimeout: null,
       joinedAt: Date.now(),
     });
 
@@ -441,6 +451,7 @@ io.on("connection", (socket) => {
       accountNickname: account || cleanAuthMode === "register" ? accountNickname : "",
       topic: rooms.get(cleanRoom).topic,
     });
+    publishTyping(cleanRoom);
   });
 
   socket.on("switch-room", async (room, callback) => {
@@ -451,6 +462,7 @@ io.on("connection", (socket) => {
     if (nextRoom === user.room) return;
 
     const previousRoom = user.room;
+    clearUserTyping(user);
     socket.leave(previousRoom);
     await sendSystem(previousRoom, `${user.nickname} a quitte le salon.`);
     publishUsers(previousRoom);
@@ -466,6 +478,16 @@ io.on("connection", (socket) => {
       room: nextRoom,
       topic: rooms.get(nextRoom).topic,
     });
+    publishTyping(nextRoom);
+  });
+
+  socket.on("typing", (payload = {}) => {
+    const user = users.get(socket.id);
+    if (!user) return;
+
+    const active =
+      typeof payload === "boolean" ? payload : Boolean(payload.active);
+    setUserTyping(user, active);
   });
 
   socket.on("message", async (payload) => {
@@ -480,6 +502,7 @@ io.on("connection", (socket) => {
         : "";
     const messageText = String(rawText || "").trim().slice(0, 500);
     if (!messageText) return;
+    clearUserTyping(user);
 
     if (messageText === "/clear") {
       socket.emit("history", []);
@@ -603,7 +626,7 @@ io.on("connection", (socket) => {
     if (!user) return;
 
     const action = String(payload.action || "");
-    if (!["edit", "delete"].includes(action)) return;
+    if (!["edit", "delete", "react"].includes(action)) return;
 
     const targetMessage = await getMessageById(String(payload.id || ""));
     if (
@@ -620,6 +643,53 @@ io.on("connection", (socket) => {
       Boolean(targetMessage.authorId) &&
       targetMessage.authorId === user.messageAuthorId;
     const canModerate = MODERATION_ROLES.has(user.role);
+
+    if (action === "react") {
+      if (!user.accountNickname) {
+        callback?.({
+          ok: false,
+          error: "Connecte-toi avec un compte pour ajouter une reaction.",
+        });
+        return;
+      }
+
+      const reactionKey = String(payload.reaction || "");
+      if (!MESSAGE_REACTIONS.has(reactionKey)) {
+        callback?.({ ok: false, error: "Cette reaction n'est pas disponible." });
+        return;
+      }
+
+      const now = Date.now();
+      if (now - user.lastReactionAt < 250) {
+        callback?.({ ok: false, error: "Attends un instant avant de reagir a nouveau." });
+        return;
+      }
+      user.lastReactionAt = now;
+
+      const reactionData = parseReactionData(targetMessage.reactionData);
+      const accountIds = new Set(reactionData[reactionKey] || []);
+      if (accountIds.has(user.messageAuthorId)) {
+        accountIds.delete(user.messageAuthorId);
+      } else {
+        accountIds.add(user.messageAuthorId);
+      }
+
+      if (accountIds.size) {
+        reactionData[reactionKey] = [...accountIds];
+      } else {
+        delete reactionData[reactionKey];
+      }
+
+      const serializedReactions = JSON.stringify(reactionData);
+      await updateMessageReactions(targetMessage.id, serializedReactions);
+      const storedMessage =
+        rooms.get(user.room).history.find((message) => message.id === targetMessage.id) ||
+        targetMessage;
+      storedMessage.reactionData = serializedReactions;
+      emitMessageToRoom("message-updated", user.room, storedMessage);
+      callback?.({ ok: true });
+      return;
+    }
 
     if (action === "edit") {
       if (!isOwner) {
@@ -670,6 +740,7 @@ io.on("connection", (socket) => {
     storedMessage.text = "";
     storedMessage.deletedAt = deletedAt;
     storedMessage.deletedBy = deletedBy;
+    storedMessage.reactionData = "{}";
     emitMessageToRoom("message-updated", user.room, storedMessage);
 
     for (const replyMessage of room.history) {
@@ -842,7 +913,9 @@ io.on("connection", (socket) => {
     const user = users.get(socket.id);
     if (!user) return;
 
+    clearUserTyping(user, false);
     users.delete(socket.id);
+    publishTyping(user.room);
     await sendSystem(user.room, `${user.nickname} a quitte le salon.`);
     publishUsers(user.room);
   });
@@ -1290,6 +1363,7 @@ async function handleSettingsAction(socket, user, payload, callback) {
     }
 
     await deleteAccount(account.nickname);
+    removeAccountReactionsFromRooms(account.nickname);
     callback?.({ ok: true });
     emitToAccount(account.nickname, "account-deleted", {});
     await publishAccountLists();
@@ -2121,6 +2195,20 @@ function serializeMessageForUser(message, user) {
     message.authorId === user.messageAuthorId;
   const canModerate = Boolean(user && MODERATION_ROLES.has(user.role));
   const canManage = message.type !== "system" && !deletedAt;
+  const reactionData = deletedAt ? {} : parseReactionData(message.reactionData);
+  const reactions = [...MESSAGE_REACTIONS.entries()]
+    .map(([key, emoji]) => {
+      const accountIds = reactionData[key] || [];
+      return {
+        key,
+        emoji,
+        count: accountIds.length,
+        reactedByMe: Boolean(
+          user?.accountNickname && accountIds.includes(user.messageAuthorId)
+        ),
+      };
+    })
+    .filter((reaction) => reaction.count > 0);
 
   return {
     id: message.id,
@@ -2137,7 +2225,93 @@ function serializeMessageForUser(message, user) {
     createdAt: Number(message.createdAt),
     canEdit: canManage && isOwner,
     canDelete: canManage && (isOwner || canModerate),
+    canReact: canManage && Boolean(user?.accountNickname),
+    reactions,
   };
+}
+
+function parseReactionData(value) {
+  let parsed = {};
+  try {
+    parsed = typeof value === "string" ? JSON.parse(value || "{}") : value || {};
+  } catch {
+    parsed = {};
+  }
+
+  const result = {};
+  for (const key of MESSAGE_REACTIONS.keys()) {
+    if (!Array.isArray(parsed[key])) continue;
+    const accountIds = [
+      ...new Set(
+        parsed[key]
+          .map((accountId) => String(accountId || ""))
+          .filter((accountId) => accountId.startsWith("account:"))
+      ),
+    ].slice(0, 500);
+    if (accountIds.length) result[key] = accountIds;
+  }
+  return result;
+}
+
+function removeAccountReactionsFromRooms(accountNickname) {
+  const accountId = `account:${accountNickname}`;
+  for (const [roomName, room] of rooms.entries()) {
+    for (const message of room.history) {
+      const reactionData = parseReactionData(message.reactionData);
+      let changed = false;
+      for (const key of Object.keys(reactionData)) {
+        const filtered = reactionData[key].filter((value) => value !== accountId);
+        if (filtered.length === reactionData[key].length) continue;
+        changed = true;
+        if (filtered.length) {
+          reactionData[key] = filtered;
+        } else {
+          delete reactionData[key];
+        }
+      }
+      if (!changed) continue;
+      message.reactionData = JSON.stringify(reactionData);
+      emitMessageToRoom("message-updated", roomName, message);
+    }
+  }
+}
+
+function setUserTyping(user, active) {
+  if (user.typingTimeout) {
+    clearTimeout(user.typingTimeout);
+    user.typingTimeout = null;
+  }
+
+  const changed = user.isTyping !== active;
+  user.isTyping = active;
+
+  if (active) {
+    user.typingTimeout = setTimeout(() => {
+      user.isTyping = false;
+      user.typingTimeout = null;
+      publishTyping(user.room);
+    }, 3_000);
+  }
+
+  if (changed) publishTyping(user.room);
+}
+
+function clearUserTyping(user, shouldPublish = true) {
+  if (user.typingTimeout) {
+    clearTimeout(user.typingTimeout);
+    user.typingTimeout = null;
+  }
+
+  const changed = user.isTyping;
+  user.isTyping = false;
+  if (changed && shouldPublish) publishTyping(user.room);
+}
+
+function publishTyping(room) {
+  const nicknames = [...users.values()]
+    .filter((user) => user.room === room && user.isTyping)
+    .map((user) => user.nickname);
+  io.to(room).emit("typing-users", { room, nicknames });
 }
 
 function publishRoomActivity(room, message, senderSocketId) {

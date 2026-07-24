@@ -17,6 +17,7 @@ Prerequis : Node.js 24 ou plus recent.
 - Centre de moderation dans une fenetre dediee.
 - Messages instantanes avec Socket.IO.
 - Reponses avec citation, modification par l'auteur et suppression par l'auteur ou la moderation.
+- Indicateur de saisie en temps reel et reactions persistantes aux messages pour les comptes.
 - Mentions avec `@pseudo`, mise en evidence et alerte cliquable.
 - Compteurs de messages non lus pour chaque salon et dans l'onglet du navigateur.
 - Alertes visuelles, sonores et notifications navigateur activables.

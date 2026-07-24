@@ -2106,6 +2106,71 @@ button {
   background: #fff8e8;
 }
 
+.message-reactions {
+  min-height: 28px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  margin-top: 7px;
+}
+
+.message-reaction,
+.reaction-add-button,
+.reaction-picker button {
+  width: auto;
+  min-width: 28px;
+  min-height: 26px;
+  margin: 0;
+  padding: 0 7px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  color: var(--ink);
+  background: #fff;
+  font-size: 12px;
+  line-height: 1;
+}
+
+span.message-reaction {
+  display: inline-flex;
+  align-items: center;
+}
+
+button.message-reaction:hover,
+.reaction-add-button:hover,
+.reaction-picker button:hover {
+  border-color: var(--accent);
+  background: var(--soft);
+}
+
+.message-reaction.is-active {
+  border-color: var(--accent);
+  color: var(--accent-dark);
+  background: var(--soft);
+  font-weight: 800;
+}
+
+.reaction-add-button {
+  padding: 0;
+  color: var(--accent-dark);
+  font-size: 18px;
+}
+
+.reaction-picker {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+}
+
+.reaction-picker[hidden] {
+  display: none;
+}
+
+.reaction-picker button {
+  padding: 0;
+  font-size: 15px;
+}
+
 .message-actions {
   min-height: 24px;
   display: flex;
@@ -2172,6 +2237,21 @@ button {
   padding: 13px max(18px, calc((100% - 820px) / 2));
   border-top: 1px solid var(--line);
   background: #fff;
+}
+
+.typing-indicator {
+  grid-column: 1 / -1;
+  min-height: 14px;
+  margin: 0;
+  color: var(--accent-dark);
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 14px;
+  visibility: hidden;
+}
+
+.typing-indicator.is-active {
+  visibility: visible;
 }
 
 .composer-context {

@@ -13,6 +13,7 @@ const composerContext = document.querySelector("#composerContext");
 const composerContextTitle = document.querySelector("#composerContextTitle");
 const composerContextText = document.querySelector("#composerContextText");
 const composerContextCancel = document.querySelector("#composerContextCancel");
+const typingIndicator = document.querySelector("#typingIndicator");
 const messages = document.querySelector("#messages");
 const roomList = document.querySelector("#roomList");
 const userList = document.querySelector("#userList");
@@ -145,6 +146,14 @@ let audioContext = null;
 let turnstileToken = "";
 let turnstileWidgetId = null;
 let activeMessageAction = null;
+let typingActive = false;
+let typingStopTimer = null;
+const REACTION_OPTIONS = [
+  { key: "like", emoji: "\u{1F44D}", label: "J'aime" },
+  { key: "heart", emoji: "\u{2764}\u{FE0F}", label: "J'adore" },
+  { key: "laugh", emoji: "\u{1F602}", label: "Drole" },
+  { key: "surprised", emoji: "\u{1F62E}", label: "Surpris" },
+];
 let alertsEnabled =
   typeof Notification !== "undefined" &&
   Notification.permission === "granted" &&
@@ -196,6 +205,7 @@ loginForm.addEventListener("submit", (event) => {
 messageForm.addEventListener("submit", (event) => {
   event.preventDefault();
   const text = messageInput.value.trim();
+  stopTyping();
   if (!text) return;
 
   if (activeMessageAction?.mode === "edit") {
@@ -230,12 +240,16 @@ messageForm.addEventListener("submit", (event) => {
   messageInput.focus();
 });
 
+messageInput.addEventListener("input", updateTypingState);
+messageInput.addEventListener("blur", stopTyping);
+
 composerContextCancel.addEventListener("click", () => {
   clearMessageAction();
   messageInput.focus();
 });
 
 leaveButton.addEventListener("click", () => {
+  stopTyping();
   window.location.reload();
 });
 
@@ -284,7 +298,11 @@ adminDialog.addEventListener("click", (event) => {
 });
 
 document.addEventListener("visibilitychange", () => {
-  if (!document.hidden) markCurrentRoomRead();
+  if (document.hidden) {
+    stopTyping();
+  } else {
+    markCurrentRoomRead();
+  }
 });
 
 window.addEventListener("focus", markCurrentRoomRead);
@@ -615,6 +633,14 @@ socket.on("message-updated", (message) => {
   }
 });
 
+socket.on("typing-users", ({ room, nicknames = [] }) => {
+  if (room !== currentRoom) return;
+  const otherNicknames = Array.isArray(nicknames)
+    ? nicknames.filter((nickname) => nickname !== currentNickname)
+    : [];
+  renderTypingIndicator(otherNicknames);
+});
+
 socket.on("room-activity", (activity) => {
   const roomIsOpen = activity.room === currentRoom;
   const pageIsVisible = !document.hidden && document.hasFocus();
@@ -843,12 +869,14 @@ function switchRoom(room) {
     return;
   }
 
+  stopTyping();
   socket.emit("switch-room", room, (response) => {
     if (!response?.ok) return;
     clearMessageAction();
     currentRoom = response.room;
     roomName.textContent = `#${response.room}`;
     roomTopic.textContent = response.topic;
+    renderTypingIndicator([]);
     unreadByRoom.delete(response.room);
     renderRoomList();
     updateDocumentTitle();
@@ -2059,6 +2087,12 @@ function renderMessage(message) {
     appendTextWithMentions(paragraph, message.text);
   }
   content.append(paragraph);
+
+  if (!message.deletedAt) {
+    const reactionBar = createMessageReactions(message);
+    if (reactionBar) content.append(reactionBar);
+  }
+
   row.append(content);
   row.classList.toggle(
     "mentions-me",
@@ -2141,6 +2175,125 @@ function createMessageActionButton(label, action, style = "") {
   button.textContent = label;
   button.addEventListener("click", action);
   return button;
+}
+
+function createMessageReactions(message) {
+  const reactions = Array.isArray(message.reactions) ? message.reactions : [];
+  if (!reactions.length && !message.canReact) return null;
+
+  const bar = document.createElement("div");
+  bar.className = "message-reactions";
+  bar.setAttribute("aria-label", "Reactions au message");
+
+  for (const reaction of reactions) {
+    const element = document.createElement(message.canReact ? "button" : "span");
+    if (message.canReact) {
+      element.type = "button";
+      element.title = reaction.reactedByMe
+        ? "Retirer cette reaction"
+        : "Ajouter cette reaction";
+      element.addEventListener("click", () => {
+        toggleMessageReaction(message.id, reaction.key);
+      });
+    }
+    element.className = reaction.reactedByMe
+      ? "message-reaction is-active"
+      : "message-reaction";
+    element.textContent = `${reaction.emoji} ${reaction.count}`;
+    bar.append(element);
+  }
+
+  if (message.canReact) {
+    const addButton = document.createElement("button");
+    addButton.type = "button";
+    addButton.className = "reaction-add-button";
+    addButton.textContent = "+";
+    addButton.title = "Ajouter une reaction";
+    addButton.setAttribute("aria-label", "Ajouter une reaction");
+    addButton.setAttribute("aria-expanded", "false");
+
+    const picker = document.createElement("div");
+    picker.className = "reaction-picker";
+    picker.hidden = true;
+
+    for (const option of REACTION_OPTIONS) {
+      const optionButton = document.createElement("button");
+      optionButton.type = "button";
+      optionButton.textContent = option.emoji;
+      optionButton.title = option.label;
+      optionButton.setAttribute("aria-label", option.label);
+      optionButton.addEventListener("click", () => {
+        toggleMessageReaction(message.id, option.key);
+      });
+      picker.append(optionButton);
+    }
+
+    addButton.addEventListener("click", () => {
+      picker.hidden = !picker.hidden;
+      addButton.setAttribute("aria-expanded", String(!picker.hidden));
+    });
+    bar.append(addButton, picker);
+  }
+
+  return bar;
+}
+
+function toggleMessageReaction(messageId, reaction) {
+  socket.emit(
+    "message-action",
+    {
+      action: "react",
+      id: messageId,
+      reaction,
+    },
+    (response) => {
+      if (!response?.ok) {
+        alert(response?.error || "La reaction n'a pas pu etre enregistree.");
+      }
+    }
+  );
+}
+
+function updateTypingState() {
+  if (!messageInput.value.trim()) {
+    stopTyping();
+    return;
+  }
+
+  if (!typingActive) {
+    typingActive = true;
+    socket.emit("typing", { active: true });
+  }
+
+  window.clearTimeout(typingStopTimer);
+  typingStopTimer = window.setTimeout(stopTyping, 1_200);
+}
+
+function stopTyping() {
+  window.clearTimeout(typingStopTimer);
+  typingStopTimer = null;
+  if (!typingActive) return;
+  typingActive = false;
+  socket.emit("typing", { active: false });
+}
+
+function renderTypingIndicator(nicknames) {
+  if (!nicknames.length) {
+    typingIndicator.textContent = "";
+    typingIndicator.classList.remove("is-active");
+    return;
+  }
+
+  if (nicknames.length === 1) {
+    typingIndicator.textContent = `${nicknames[0]} \u00e9crit\u2026`;
+  } else if (nicknames.length === 2) {
+    typingIndicator.textContent = `${nicknames[0]} et ${nicknames[1]} \u00e9crivent\u2026`;
+  } else {
+    typingIndicator.textContent =
+      `${nicknames[0]}, ${nicknames[1]} et ${nicknames.length - 2} autres ` +
+      "\u00e9crivent\u2026";
+  }
+  typingIndicator.classList.add("is-active");
 }
 
 function placeMessageRow(row, messageId) {

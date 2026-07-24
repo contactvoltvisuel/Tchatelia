@@ -36,6 +36,7 @@ export async function initDatabase() {
       edited_at BIGINT,
       deleted_at BIGINT,
       deleted_by TEXT NOT NULL DEFAULT '',
+      reaction_data TEXT NOT NULL DEFAULT '{}',
       created_at BIGINT NOT NULL
     );
 
@@ -162,6 +163,9 @@ export async function initDatabase() {
   await pool.query("ALTER TABLE messages ADD COLUMN IF NOT EXISTS edited_at BIGINT");
   await pool.query("ALTER TABLE messages ADD COLUMN IF NOT EXISTS deleted_at BIGINT");
   await pool.query("ALTER TABLE messages ADD COLUMN IF NOT EXISTS deleted_by TEXT NOT NULL DEFAULT ''");
+  await pool.query(
+    "ALTER TABLE messages ADD COLUMN IF NOT EXISTS reaction_data TEXT NOT NULL DEFAULT '{}'"
+  );
 
   for (const [name, topic] of defaultRooms) {
     await pool.query(
@@ -403,6 +407,7 @@ export async function getMessageById(id) {
         reply_to_id AS "replyToId", reply_to_nickname AS "replyToNickname",
         reply_to_text AS "replyToText", reply_to_deleted AS "replyToDeleted",
         edited_at AS "editedAt", deleted_at AS "deletedAt", deleted_by AS "deletedBy",
+        reaction_data AS "reactionData",
         created_at AS "createdAt"
       FROM messages
       WHERE id = $1
@@ -633,6 +638,36 @@ export async function deleteAccount(nickname) {
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
+    const accountId = `account:${nickname}`;
+    const reactionResult = await client.query(
+      "SELECT id, reaction_data AS \"reactionData\" FROM messages WHERE reaction_data <> '{}'"
+    );
+    for (const row of reactionResult.rows) {
+      let reactions = {};
+      try {
+        reactions = JSON.parse(row.reactionData || "{}");
+      } catch {
+        reactions = {};
+      }
+      let changed = false;
+      for (const key of Object.keys(reactions)) {
+        if (!Array.isArray(reactions[key])) continue;
+        const filtered = reactions[key].filter((value) => value !== accountId);
+        if (filtered.length === reactions[key].length) continue;
+        changed = true;
+        if (filtered.length) {
+          reactions[key] = filtered;
+        } else {
+          delete reactions[key];
+        }
+      }
+      if (changed) {
+        await client.query("UPDATE messages SET reaction_data = $1 WHERE id = $2", [
+          JSON.stringify(reactions),
+          row.id,
+        ]);
+      }
+    }
     await client.query("DELETE FROM reports WHERE reporter = $1", [nickname]);
     await client.query(
       "DELETE FROM private_blocks WHERE blocker = $1 OR blocked = $1",
@@ -675,6 +710,7 @@ export async function getRoomHistory(room, limit = 80) {
         reply_to_id AS "replyToId", reply_to_nickname AS "replyToNickname",
         reply_to_text AS "replyToText", reply_to_deleted AS "replyToDeleted",
         edited_at AS "editedAt", deleted_at AS "deletedAt", deleted_by AS "deletedBy",
+        reaction_data AS "reactionData",
         created_at AS "createdAt"
       FROM messages
       WHERE room = $1
@@ -693,9 +729,9 @@ export async function saveMessage(room, message) {
       INSERT INTO messages (
         id, room, type, nickname, text, author_id,
         reply_to_id, reply_to_nickname, reply_to_text, reply_to_deleted,
-        edited_at, deleted_at, deleted_by, created_at
+        edited_at, deleted_at, deleted_by, reaction_data, created_at
       )
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
       ON CONFLICT (id) DO UPDATE SET
         room = EXCLUDED.room,
         type = EXCLUDED.type,
@@ -709,6 +745,7 @@ export async function saveMessage(room, message) {
         edited_at = EXCLUDED.edited_at,
         deleted_at = EXCLUDED.deleted_at,
         deleted_by = EXCLUDED.deleted_by,
+        reaction_data = EXCLUDED.reaction_data,
         created_at = EXCLUDED.created_at
     `,
     [
@@ -725,6 +762,7 @@ export async function saveMessage(room, message) {
       message.editedAt || null,
       message.deletedAt || null,
       message.deletedBy || "",
+      message.reactionData || "{}",
       message.createdAt,
     ]
   );
@@ -766,7 +804,7 @@ export async function deleteMessageContent(id, deletedAt, deletedBy) {
     await client.query(
       `
         UPDATE messages
-        SET text = '', deleted_at = $1, deleted_by = $2
+        SET text = '', deleted_at = $1, deleted_by = $2, reaction_data = '{}'
         WHERE id = $3 AND deleted_at IS NULL
       `,
       [deletedAt, deletedBy, id]
@@ -786,6 +824,17 @@ export async function deleteMessageContent(id, deletedAt, deletedBy) {
   } finally {
     client.release();
   }
+}
+
+export async function updateMessageReactions(id, reactionData) {
+  await pool.query(
+    `
+      UPDATE messages
+      SET reaction_data = $1
+      WHERE id = $2 AND deleted_at IS NULL
+    `,
+    [reactionData, id]
+  );
 }
 
 export async function trimRoomHistory(room, limit = 250) {

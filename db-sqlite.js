@@ -40,6 +40,7 @@ export async function initDatabase() {
       edited_at INTEGER,
       deleted_at INTEGER,
       deleted_by TEXT NOT NULL DEFAULT '',
+      reaction_data TEXT NOT NULL DEFAULT '{}',
       created_at INTEGER NOT NULL,
       FOREIGN KEY (room) REFERENCES rooms(name)
     );
@@ -187,6 +188,7 @@ export async function initDatabase() {
     "ALTER TABLE messages ADD COLUMN edited_at INTEGER",
     "ALTER TABLE messages ADD COLUMN deleted_at INTEGER",
     "ALTER TABLE messages ADD COLUMN deleted_by TEXT NOT NULL DEFAULT ''",
+    "ALTER TABLE messages ADD COLUMN reaction_data TEXT NOT NULL DEFAULT '{}'",
   ];
 
   for (const migration of messageMigrations) {
@@ -413,6 +415,7 @@ export async function getMessageById(id) {
         reply_to_id AS replyToId, reply_to_nickname AS replyToNickname,
         reply_to_text AS replyToText, reply_to_deleted AS replyToDeleted,
         edited_at AS editedAt, deleted_at AS deletedAt, deleted_by AS deletedBy,
+        reaction_data AS reactionData,
         created_at AS createdAt
       FROM messages
       WHERE id = ?
@@ -617,6 +620,34 @@ export async function updateAccountSettings(nickname, settings) {
 export async function deleteAccount(nickname) {
   db.exec("BEGIN");
   try {
+    const accountId = `account:${nickname}`;
+    const reactionRows = db
+      .prepare("SELECT id, reaction_data AS reactionData FROM messages WHERE reaction_data <> '{}'")
+      .all();
+    const updateReactions = db.prepare(
+      "UPDATE messages SET reaction_data = ? WHERE id = ?"
+    );
+    for (const row of reactionRows) {
+      let reactions = {};
+      try {
+        reactions = JSON.parse(row.reactionData || "{}");
+      } catch {
+        reactions = {};
+      }
+      let changed = false;
+      for (const key of Object.keys(reactions)) {
+        if (!Array.isArray(reactions[key])) continue;
+        const filtered = reactions[key].filter((value) => value !== accountId);
+        if (filtered.length === reactions[key].length) continue;
+        changed = true;
+        if (filtered.length) {
+          reactions[key] = filtered;
+        } else {
+          delete reactions[key];
+        }
+      }
+      if (changed) updateReactions.run(JSON.stringify(reactions), row.id);
+    }
     db.prepare("DELETE FROM reports WHERE reporter = ?").run(nickname);
     db.prepare("DELETE FROM private_blocks WHERE blocker = ? OR blocked = ?").run(
       nickname,
@@ -657,6 +688,7 @@ export async function getRoomHistory(room, limit = 80) {
         reply_to_id AS replyToId, reply_to_nickname AS replyToNickname,
         reply_to_text AS replyToText, reply_to_deleted AS replyToDeleted,
         edited_at AS editedAt, deleted_at AS deletedAt, deleted_by AS deletedBy,
+        reaction_data AS reactionData,
         created_at AS createdAt
       FROM messages
       WHERE room = ?
@@ -672,9 +704,9 @@ export async function saveMessage(room, message) {
     INSERT OR REPLACE INTO messages (
       id, room, type, nickname, text, author_id,
       reply_to_id, reply_to_nickname, reply_to_text, reply_to_deleted,
-      edited_at, deleted_at, deleted_by, created_at
+      edited_at, deleted_at, deleted_by, reaction_data, created_at
     )
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
     message.id,
     room,
@@ -689,6 +721,7 @@ export async function saveMessage(room, message) {
     message.editedAt || null,
     message.deletedAt || null,
     message.deletedBy || "",
+    message.reactionData || "{}",
     message.createdAt
   );
 }
@@ -718,7 +751,7 @@ export async function deleteMessageContent(id, deletedAt, deletedBy) {
   try {
     db.prepare(`
       UPDATE messages
-      SET text = '', deleted_at = ?, deleted_by = ?
+      SET text = '', deleted_at = ?, deleted_by = ?, reaction_data = '{}'
       WHERE id = ? AND deleted_at IS NULL
     `).run(deletedAt, deletedBy, id);
     db.prepare(`
@@ -731,6 +764,14 @@ export async function deleteMessageContent(id, deletedAt, deletedBy) {
     db.exec("ROLLBACK");
     throw error;
   }
+}
+
+export async function updateMessageReactions(id, reactionData) {
+  db.prepare(`
+    UPDATE messages
+    SET reaction_data = ?
+    WHERE id = ? AND deleted_at IS NULL
+  `).run(reactionData, id);
 }
 
 export async function trimRoomHistory(room, limit = 250) {
