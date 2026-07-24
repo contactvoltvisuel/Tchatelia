@@ -1073,6 +1073,9 @@ function closeMobilePanels() {
 
 function showChat(response) {
   document.body.classList.add("chat-active");
+  document.documentElement.scrollTop = 0;
+  document.body.scrollTop = 0;
+  window.scrollTo(0, 0);
   loginPanel.classList.add("hidden");
   chatPanel.classList.remove("hidden");
   roomName.textContent = `#${response.room}`;
@@ -1086,6 +1089,10 @@ function showChat(response) {
   updateNotificationButton();
   renderAdminPanel();
   messageInput.focus();
+  window.requestAnimationFrame(() => {
+    chatPanel.scrollTop = 0;
+    window.scrollTo(0, 0);
+  });
 }
 
 function markCurrentRoomRead() {

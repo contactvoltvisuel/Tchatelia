@@ -1446,6 +1446,11 @@ body:not(.chat-active) {
 }
 
 body.chat-active {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
   overflow: hidden;
 }
 
@@ -1848,6 +1853,7 @@ button {
 }
 
 .chat-header {
+  grid-row: 1;
   min-width: 0;
   padding: 12px 18px;
   background: #fff;
@@ -1941,6 +1947,7 @@ button {
 }
 
 .message-search {
+  grid-row: 2;
   min-width: 0;
   display: grid;
   grid-template-columns: minmax(220px, 1fr) auto auto;
@@ -2010,6 +2017,7 @@ button {
 }
 
 .messages {
+  grid-row: 3;
   gap: 2px;
   padding: 18px max(18px, calc((100% - 820px) / 2));
   background: var(--canvas);
@@ -2310,6 +2318,7 @@ button.message-reaction:hover,
 }
 
 .message-form {
+  grid-row: 4;
   position: static;
   grid-template-columns: minmax(0, 1fr) auto;
   gap: 9px;
