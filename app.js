@@ -9,6 +9,10 @@ const loginSecurity = document.querySelector("#loginSecurity");
 const turnstileWidget = document.querySelector("#turnstileWidget");
 const messageForm = document.querySelector("#messageForm");
 const messageInput = document.querySelector("#messageInput");
+const composerContext = document.querySelector("#composerContext");
+const composerContextTitle = document.querySelector("#composerContextTitle");
+const composerContextText = document.querySelector("#composerContextText");
+const composerContextCancel = document.querySelector("#composerContextCancel");
 const messages = document.querySelector("#messages");
 const roomList = document.querySelector("#roomList");
 const userList = document.querySelector("#userList");
@@ -140,6 +144,7 @@ let privateUnreadTotal = 0;
 let audioContext = null;
 let turnstileToken = "";
 let turnstileWidgetId = null;
+let activeMessageAction = null;
 let alertsEnabled =
   typeof Notification !== "undefined" &&
   Notification.permission === "granted" &&
@@ -190,8 +195,43 @@ loginForm.addEventListener("submit", (event) => {
 
 messageForm.addEventListener("submit", (event) => {
   event.preventDefault();
-  socket.emit("message", messageInput.value);
+  const text = messageInput.value.trim();
+  if (!text) return;
+
+  if (activeMessageAction?.mode === "edit") {
+    socket.emit(
+      "message-action",
+      {
+        action: "edit",
+        id: activeMessageAction.id,
+        text,
+      },
+      (response) => {
+        if (!response?.ok) {
+          alert(response?.error || "Le message n'a pas pu etre modifie.");
+          return;
+        }
+        messageInput.value = "";
+        clearMessageAction();
+      }
+    );
+    return;
+  }
+
+  socket.emit("message", {
+    text,
+    replyToId:
+      activeMessageAction?.mode === "reply"
+        ? activeMessageAction.id
+        : "",
+  });
   messageInput.value = "";
+  clearMessageAction();
+  messageInput.focus();
+});
+
+composerContextCancel.addEventListener("click", () => {
+  clearMessageAction();
   messageInput.focus();
 });
 
@@ -558,6 +598,7 @@ adminRefreshContactsButton.addEventListener("click", () => {
 
 socket.on("history", (history) => {
   messages.innerHTML = "";
+  clearMessageAction();
   history.forEach(renderMessage);
   scrollToLatest();
 });
@@ -565,6 +606,13 @@ socket.on("history", (history) => {
 socket.on("message", (message) => {
   renderMessage(message);
   scrollToLatest();
+});
+
+socket.on("message-updated", (message) => {
+  renderMessage(message);
+  if (activeMessageAction?.id === message.id && message.deletedAt) {
+    clearMessageAction();
+  }
 });
 
 socket.on("room-activity", (activity) => {
@@ -797,6 +845,7 @@ function switchRoom(room) {
 
   socket.emit("switch-room", room, (response) => {
     if (!response?.ok) return;
+    clearMessageAction();
     currentRoom = response.room;
     roomName.textContent = `#${response.room}`;
     roomTopic.textContent = response.topic;
@@ -1265,6 +1314,7 @@ function formatLogAction(action) {
     room_created: "Salon cree",
     room_topic: "Sujet modifie",
     room_deleted: "Salon supprime",
+    message_deleted: "Message supprime",
     report_resolved: "Signalement traite",
     report_dismissed: "Signalement rejete",
     contact_resolved: "Contact traite",
@@ -1942,10 +1992,11 @@ function mentionsCurrentUser(text) {
 function renderMessage(message) {
   const row = document.createElement("article");
   row.className = `message ${message.type}`;
+  row.dataset.messageId = message.id;
 
   if (message.type === "system") {
     row.textContent = message.text;
-    messages.append(row);
+    placeMessageRow(row, message.id);
     return;
   }
 
@@ -1971,11 +2022,48 @@ function renderMessage(message) {
       <time>${time}</time>
     </div>
   `;
+
+  if (message.editedAt && !message.deletedAt) {
+    const edited = document.createElement("span");
+    edited.className = "message-edited";
+    edited.textContent = "modifie";
+    edited.title = "Ce message a ete modifie";
+    content.querySelector(".message-meta").append(edited);
+  }
+
+  if (message.replyToId && !message.deletedAt) {
+    const reference = document.createElement("button");
+    reference.type = "button";
+    reference.className = "message-reply-reference";
+
+    const referenceAuthor = document.createElement("strong");
+    referenceAuthor.textContent = message.replyToNickname || "Message";
+
+    const referenceText = document.createElement("span");
+    referenceText.textContent = message.replyToDeleted
+      ? "Message supprime"
+      : message.replyToText;
+
+    reference.append(referenceAuthor, referenceText);
+    reference.addEventListener("click", () => {
+      focusReferencedMessage(message.replyToId);
+    });
+    content.append(reference);
+  }
+
   const paragraph = document.createElement("p");
-  appendTextWithMentions(paragraph, message.text);
+  if (message.deletedAt) {
+    row.classList.add("is-deleted");
+    paragraph.textContent = "Message supprime.";
+  } else {
+    appendTextWithMentions(paragraph, message.text);
+  }
   content.append(paragraph);
   row.append(content);
-  row.classList.toggle("mentions-me", mentionsCurrentUser(message.text));
+  row.classList.toggle(
+    "mentions-me",
+    !message.deletedAt && mentionsCurrentUser(message.text)
+  );
 
   if (connectedUser?.role === "admin" || connectedUser?.role === "moderator") {
     const role = document.createElement("span");
@@ -1984,7 +2072,50 @@ function renderMessage(message) {
     content.querySelector(".message-meta").append(role);
   }
 
-  if (currentAccount && message.nickname !== currentNickname) {
+  const actions = document.createElement("div");
+  actions.className = "message-actions";
+
+  if (!message.deletedAt) {
+    actions.append(
+      createMessageActionButton("Repondre", () => {
+        setMessageAction("reply", message);
+      })
+    );
+  }
+
+  if (message.canEdit) {
+    actions.append(
+      createMessageActionButton("Modifier", () => {
+        setMessageAction("edit", message);
+      })
+    );
+  }
+
+  if (message.canDelete) {
+    actions.append(
+      createMessageActionButton(
+        "Supprimer",
+        () => {
+          if (!confirm("Supprimer ce message ?")) return;
+          socket.emit(
+            "message-action",
+            {
+              action: "delete",
+              id: message.id,
+            },
+            (response) => {
+              if (!response?.ok) {
+                alert(response?.error || "Le message n'a pas pu etre supprime.");
+              }
+            }
+          );
+        },
+        "danger"
+      )
+    );
+  }
+
+  if (currentAccount && message.nickname !== currentNickname && !message.deletedAt) {
     const reportButton = document.createElement("button");
     reportButton.type = "button";
     reportButton.className = "message-report-button";
@@ -1996,10 +2127,79 @@ function renderMessage(message) {
         messageId: message.id,
       });
     });
-    content.querySelector(".message-meta").append(reportButton);
+    actions.append(reportButton);
   }
 
-  messages.append(row);
+  if (actions.childElementCount) content.append(actions);
+  placeMessageRow(row, message.id);
+}
+
+function createMessageActionButton(label, action, style = "") {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = style ? `message-action-button ${style}` : "message-action-button";
+  button.textContent = label;
+  button.addEventListener("click", action);
+  return button;
+}
+
+function placeMessageRow(row, messageId) {
+  const existing = [...messages.children].find(
+    (child) => child.dataset.messageId === messageId
+  );
+  if (existing) {
+    existing.replaceWith(row);
+  } else {
+    messages.append(row);
+  }
+}
+
+function setMessageAction(mode, message) {
+  if (message.deletedAt) return;
+  if (activeMessageAction?.mode === "edit" && mode !== "edit") {
+    messageInput.value = "";
+  }
+  activeMessageAction = {
+    mode,
+    id: message.id,
+    nickname: message.nickname,
+    text: message.text,
+  };
+
+  composerContextTitle.textContent =
+    mode === "edit"
+      ? "Modification de votre message"
+      : `Reponse a ${message.nickname}`;
+  composerContextText.textContent = message.text;
+  composerContext.classList.remove("hidden");
+  messageInput.placeholder =
+    mode === "edit" ? "Modifie ton message..." : "Ecris ta reponse...";
+
+  if (mode === "edit") {
+    messageInput.value = message.text;
+  }
+  messageInput.focus();
+}
+
+function clearMessageAction() {
+  const wasEditing = activeMessageAction?.mode === "edit";
+  activeMessageAction = null;
+  composerContext.classList.add("hidden");
+  composerContextTitle.textContent = "Reponse";
+  composerContextText.textContent = "";
+  messageInput.placeholder = "Ecris un message...";
+  if (wasEditing) messageInput.value = "";
+}
+
+function focusReferencedMessage(messageId) {
+  const target = [...messages.children].find(
+    (child) => child.dataset.messageId === messageId
+  );
+  if (!target) return;
+
+  target.scrollIntoView({ behavior: "smooth", block: "center" });
+  target.classList.add("is-focused");
+  window.setTimeout(() => target.classList.remove("is-focused"), 1400);
 }
 
 function scrollToLatest() {

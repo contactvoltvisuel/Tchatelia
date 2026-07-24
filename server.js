@@ -20,6 +20,7 @@ import {
   createReport,
   createRoom,
   deleteAccount,
+  deleteMessageContent,
   deleteRoom,
   getAccountByNickname,
   getContactMessageById,
@@ -55,6 +56,7 @@ import {
   updateAccountSettings,
   updateAccountRole,
   updateContactMessageStatus,
+  updateMessageText,
   updateRoomTopic,
   updateReportStatus,
 } from "./db.js";
@@ -399,6 +401,10 @@ io.on("connection", (socket) => {
       privateMessagesEnabled: account
         ? Boolean(account.privateMessagesEnabled)
         : true,
+      messageAuthorId:
+        account || cleanAuthMode === "register"
+          ? `account:${accountNickname}`
+          : `guest:${randomUUID()}`,
       securityIdentityHash: securityIdentity.hash,
       memberSince: account?.createdAt || Date.now(),
       messageTimes: [],
@@ -410,7 +416,7 @@ io.on("connection", (socket) => {
 
     socket.join(cleanRoom);
     socket.emit("rooms", getRoomList());
-    socket.emit("history", rooms.get(cleanRoom).history);
+    sendRoomHistory(socket, users.get(socket.id), cleanRoom);
     await sendSystem(cleanRoom, `${displayName}${formatRoleSuffix(role)} vient d'entrer dans le salon.`);
     publishUsers(cleanRoom);
     if (role === "admin") {
@@ -451,7 +457,7 @@ io.on("connection", (socket) => {
 
     user.room = nextRoom;
     socket.join(nextRoom);
-    socket.emit("history", rooms.get(nextRoom).history);
+    sendRoomHistory(socket, user, nextRoom);
     await sendSystem(nextRoom, `${user.nickname} vient d'entrer dans le salon.`);
     publishUsers(nextRoom);
 
@@ -462,11 +468,17 @@ io.on("connection", (socket) => {
     });
   });
 
-  socket.on("message", async (text) => {
+  socket.on("message", async (payload) => {
     const user = users.get(socket.id);
     if (!user) return;
 
-    const messageText = String(text || "").trim().slice(0, 500);
+    const rawText =
+      payload && typeof payload === "object" ? payload.text : payload;
+    const replyToId =
+      payload && typeof payload === "object"
+        ? String(payload.replyToId || "").trim()
+        : "";
+    const messageText = String(rawText || "").trim().slice(0, 500);
     if (!messageText) return;
 
     if (messageText === "/clear") {
@@ -537,12 +549,39 @@ io.on("connection", (socket) => {
       return;
     }
 
+    let reply = {
+      replyToId: "",
+      replyToNickname: "",
+      replyToText: "",
+      replyToDeleted: false,
+    };
+    if (replyToId) {
+      const repliedMessage = await getMessageById(replyToId);
+      if (
+        !repliedMessage ||
+        repliedMessage.room !== user.room ||
+        repliedMessage.type === "system" ||
+        repliedMessage.deletedAt
+      ) {
+        emitPrivateSystem(socket, "Le message auquel tu reponds n'est plus disponible.");
+        return;
+      }
+      reply = {
+        replyToId: repliedMessage.id,
+        replyToNickname: repliedMessage.nickname,
+        replyToText: repliedMessage.text.slice(0, 160),
+        replyToDeleted: false,
+      };
+    }
+
     if (messageText.startsWith("/me ")) {
       await addMessage(user.room, {
         id: crypto.randomUUID(),
         type: "action",
         nickname: user.nickname,
         text: messageText.slice(4),
+        authorId: user.messageAuthorId,
+        ...reply,
         createdAt: Date.now(),
       }, socket.id);
       return;
@@ -553,8 +592,102 @@ io.on("connection", (socket) => {
       type: "message",
       nickname: user.nickname,
       text: messageText,
+      authorId: user.messageAuthorId,
+      ...reply,
       createdAt: Date.now(),
     }, socket.id);
+  });
+
+  socket.on("message-action", async (payload = {}, callback) => {
+    const user = users.get(socket.id);
+    if (!user) return;
+
+    const action = String(payload.action || "");
+    if (!["edit", "delete"].includes(action)) return;
+
+    const targetMessage = await getMessageById(String(payload.id || ""));
+    if (
+      !targetMessage ||
+      targetMessage.room !== user.room ||
+      targetMessage.type === "system" ||
+      targetMessage.deletedAt
+    ) {
+      callback?.({ ok: false, error: "Ce message n'est plus disponible." });
+      return;
+    }
+
+    const isOwner =
+      Boolean(targetMessage.authorId) &&
+      targetMessage.authorId === user.messageAuthorId;
+    const canModerate = MODERATION_ROLES.has(user.role);
+
+    if (action === "edit") {
+      if (!isOwner) {
+        callback?.({ ok: false, error: "Tu ne peux modifier que tes propres messages." });
+        return;
+      }
+
+      const text = String(payload.text || "").trim().slice(0, 500);
+      if (!text) {
+        callback?.({ ok: false, error: "Le message ne peut pas etre vide." });
+        return;
+      }
+
+      const editedAt = Date.now();
+      await updateMessageText(targetMessage.id, text, editedAt);
+      const storedMessage =
+        rooms.get(user.room).history.find((message) => message.id === targetMessage.id) ||
+        targetMessage;
+      storedMessage.text = text;
+      storedMessage.editedAt = editedAt;
+      emitMessageToRoom("message-updated", user.room, storedMessage);
+      for (const replyMessage of rooms.get(user.room).history) {
+        if (
+          replyMessage.replyToId !== targetMessage.id ||
+          replyMessage.replyToDeleted
+        ) {
+          continue;
+        }
+        replyMessage.replyToText = text.slice(0, 160);
+        emitMessageToRoom("message-updated", user.room, replyMessage);
+      }
+      callback?.({ ok: true });
+      return;
+    }
+
+    if (!isOwner && !canModerate) {
+      callback?.({ ok: false, error: "Tu ne peux pas supprimer ce message." });
+      return;
+    }
+
+    const deletedAt = Date.now();
+    const deletedBy = isOwner ? "author" : user.nickname;
+    await deleteMessageContent(targetMessage.id, deletedAt, deletedBy);
+    const room = rooms.get(user.room);
+    const storedMessage =
+      room.history.find((message) => message.id === targetMessage.id) ||
+      targetMessage;
+    storedMessage.text = "";
+    storedMessage.deletedAt = deletedAt;
+    storedMessage.deletedBy = deletedBy;
+    emitMessageToRoom("message-updated", user.room, storedMessage);
+
+    for (const replyMessage of room.history) {
+      if (replyMessage.replyToId !== targetMessage.id) continue;
+      replyMessage.replyToText = "";
+      replyMessage.replyToDeleted = true;
+      emitMessageToRoom("message-updated", user.room, replyMessage);
+    }
+
+    if (!isOwner && canModerate) {
+      await recordModerationAction(
+        user,
+        "message_deleted",
+        targetMessage.nickname,
+        `Message supprime dans #${user.room}`
+      );
+    }
+    callback?.({ ok: true });
   });
 
   socket.on("admin-action", async ({ action, nickname }) => {
@@ -1432,7 +1565,7 @@ async function handleCreateReport(socket, user, payload) {
 
   if (kind === "public_message") {
     const message = await getMessageById(String(payload.messageId || ""));
-    if (!message || message.type === "system") {
+    if (!message || message.type === "system" || message.deletedAt) {
       socket.emit("report-error", { text: "Ce message n'est plus disponible." });
       return;
     }
@@ -1773,7 +1906,7 @@ async function handleRoomAction(socket, admin, action, rawName, rawTopic) {
       targetSocket?.leave(name);
       user.room = "accueil";
       targetSocket?.join("accueil");
-      targetSocket?.emit("history", rooms.get("accueil").history);
+      sendRoomHistory(targetSocket, user, "accueil");
       targetSocket?.emit("room-updated", {
         room: "accueil",
         topic: rooms.get("accueil").topic,
@@ -1960,10 +2093,51 @@ async function addMessage(room, message, senderSocketId = "") {
   currentRoom.history = currentRoom.history.slice(-MAX_HISTORY);
   await saveMessage(room, message);
   await trimRoomHistory(room);
-  io.to(room).emit("message", message);
+  emitMessageToRoom("message", room, message);
   if (message.type !== "system") {
     publishRoomActivity(room, message, senderSocketId);
   }
+}
+
+function sendRoomHistory(socket, user, room) {
+  socket?.emit(
+    "history",
+    rooms.get(room).history.map((message) => serializeMessageForUser(message, user))
+  );
+}
+
+function emitMessageToRoom(eventName, room, message) {
+  for (const [socketId, user] of users.entries()) {
+    if (user.room !== room) continue;
+    io.to(socketId).emit(eventName, serializeMessageForUser(message, user));
+  }
+}
+
+function serializeMessageForUser(message, user) {
+  const deletedAt = Number(message.deletedAt) || null;
+  const isOwner =
+    Boolean(message.authorId) &&
+    Boolean(user?.messageAuthorId) &&
+    message.authorId === user.messageAuthorId;
+  const canModerate = Boolean(user && MODERATION_ROLES.has(user.role));
+  const canManage = message.type !== "system" && !deletedAt;
+
+  return {
+    id: message.id,
+    type: message.type,
+    nickname: message.nickname,
+    text: deletedAt ? "" : message.text,
+    replyToId: message.replyToId || "",
+    replyToNickname: message.replyToNickname || "",
+    replyToText: message.replyToDeleted ? "" : message.replyToText || "",
+    replyToDeleted: Boolean(message.replyToDeleted),
+    editedAt: Number(message.editedAt) || null,
+    deletedAt,
+    deletedBy: message.deletedBy || "",
+    createdAt: Number(message.createdAt),
+    canEdit: canManage && isOwner,
+    canDelete: canManage && (isOwner || canModerate),
+  };
 }
 
 function publishRoomActivity(room, message, senderSocketId) {

@@ -28,6 +28,14 @@ export async function initDatabase() {
       type TEXT NOT NULL,
       nickname TEXT NOT NULL,
       text TEXT NOT NULL,
+      author_id TEXT NOT NULL DEFAULT '',
+      reply_to_id TEXT NOT NULL DEFAULT '',
+      reply_to_nickname TEXT NOT NULL DEFAULT '',
+      reply_to_text TEXT NOT NULL DEFAULT '',
+      reply_to_deleted BOOLEAN NOT NULL DEFAULT FALSE,
+      edited_at BIGINT,
+      deleted_at BIGINT,
+      deleted_by TEXT NOT NULL DEFAULT '',
       created_at BIGINT NOT NULL
     );
 
@@ -140,6 +148,20 @@ export async function initDatabase() {
   await pool.query(
     "ALTER TABLE accounts ADD COLUMN IF NOT EXISTS private_messages_enabled BOOLEAN NOT NULL DEFAULT TRUE"
   );
+  await pool.query("ALTER TABLE messages ADD COLUMN IF NOT EXISTS author_id TEXT NOT NULL DEFAULT ''");
+  await pool.query("ALTER TABLE messages ADD COLUMN IF NOT EXISTS reply_to_id TEXT NOT NULL DEFAULT ''");
+  await pool.query(
+    "ALTER TABLE messages ADD COLUMN IF NOT EXISTS reply_to_nickname TEXT NOT NULL DEFAULT ''"
+  );
+  await pool.query(
+    "ALTER TABLE messages ADD COLUMN IF NOT EXISTS reply_to_text TEXT NOT NULL DEFAULT ''"
+  );
+  await pool.query(
+    "ALTER TABLE messages ADD COLUMN IF NOT EXISTS reply_to_deleted BOOLEAN NOT NULL DEFAULT FALSE"
+  );
+  await pool.query("ALTER TABLE messages ADD COLUMN IF NOT EXISTS edited_at BIGINT");
+  await pool.query("ALTER TABLE messages ADD COLUMN IF NOT EXISTS deleted_at BIGINT");
+  await pool.query("ALTER TABLE messages ADD COLUMN IF NOT EXISTS deleted_by TEXT NOT NULL DEFAULT ''");
 
   for (const [name, topic] of defaultRooms) {
     await pool.query(
@@ -377,7 +399,11 @@ export async function listPrivateBlocks(blocker) {
 export async function getMessageById(id) {
   const result = await pool.query(
     `
-      SELECT id, room, type, nickname, text, created_at AS "createdAt"
+      SELECT id, room, type, nickname, text, author_id AS "authorId",
+        reply_to_id AS "replyToId", reply_to_nickname AS "replyToNickname",
+        reply_to_text AS "replyToText", reply_to_deleted AS "replyToDeleted",
+        edited_at AS "editedAt", deleted_at AS "deletedAt", deleted_by AS "deletedBy",
+        created_at AS "createdAt"
       FROM messages
       WHERE id = $1
     `,
@@ -645,7 +671,11 @@ export async function deleteRoom(name) {
 export async function getRoomHistory(room, limit = 80) {
   const result = await pool.query(
     `
-      SELECT id, type, nickname, text, created_at AS "createdAt"
+      SELECT id, type, nickname, text, author_id AS "authorId",
+        reply_to_id AS "replyToId", reply_to_nickname AS "replyToNickname",
+        reply_to_text AS "replyToText", reply_to_deleted AS "replyToDeleted",
+        edited_at AS "editedAt", deleted_at AS "deletedAt", deleted_by AS "deletedBy",
+        created_at AS "createdAt"
       FROM messages
       WHERE room = $1
       ORDER BY created_at DESC
@@ -660,17 +690,102 @@ export async function getRoomHistory(room, limit = 80) {
 export async function saveMessage(room, message) {
   await pool.query(
     `
-      INSERT INTO messages (id, room, type, nickname, text, created_at)
-      VALUES ($1, $2, $3, $4, $5, $6)
+      INSERT INTO messages (
+        id, room, type, nickname, text, author_id,
+        reply_to_id, reply_to_nickname, reply_to_text, reply_to_deleted,
+        edited_at, deleted_at, deleted_by, created_at
+      )
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
       ON CONFLICT (id) DO UPDATE SET
         room = EXCLUDED.room,
         type = EXCLUDED.type,
         nickname = EXCLUDED.nickname,
         text = EXCLUDED.text,
+        author_id = EXCLUDED.author_id,
+        reply_to_id = EXCLUDED.reply_to_id,
+        reply_to_nickname = EXCLUDED.reply_to_nickname,
+        reply_to_text = EXCLUDED.reply_to_text,
+        reply_to_deleted = EXCLUDED.reply_to_deleted,
+        edited_at = EXCLUDED.edited_at,
+        deleted_at = EXCLUDED.deleted_at,
+        deleted_by = EXCLUDED.deleted_by,
         created_at = EXCLUDED.created_at
     `,
-    [message.id, room, message.type, message.nickname, message.text, message.createdAt]
+    [
+      message.id,
+      room,
+      message.type,
+      message.nickname,
+      message.text,
+      message.authorId || "",
+      message.replyToId || "",
+      message.replyToNickname || "",
+      message.replyToText || "",
+      Boolean(message.replyToDeleted),
+      message.editedAt || null,
+      message.deletedAt || null,
+      message.deletedBy || "",
+      message.createdAt,
+    ]
   );
+}
+
+export async function updateMessageText(id, text, editedAt) {
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    await client.query(
+      `
+        UPDATE messages
+        SET text = $1, edited_at = $2
+        WHERE id = $3 AND deleted_at IS NULL
+      `,
+      [text, editedAt, id]
+    );
+    await client.query(
+      `
+        UPDATE messages
+        SET reply_to_text = $1
+        WHERE reply_to_id = $2 AND reply_to_deleted = FALSE
+      `,
+      [text.slice(0, 160), id]
+    );
+    await client.query("COMMIT");
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+export async function deleteMessageContent(id, deletedAt, deletedBy) {
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    await client.query(
+      `
+        UPDATE messages
+        SET text = '', deleted_at = $1, deleted_by = $2
+        WHERE id = $3 AND deleted_at IS NULL
+      `,
+      [deletedAt, deletedBy, id]
+    );
+    await client.query(
+      `
+        UPDATE messages
+        SET reply_to_text = '', reply_to_deleted = TRUE
+        WHERE reply_to_id = $1
+      `,
+      [id]
+    );
+    await client.query("COMMIT");
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
 }
 
 export async function trimRoomHistory(room, limit = 250) {

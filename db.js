@@ -10,6 +10,7 @@ export const {
   createRoom,
   createAccount,
   deleteAccount,
+  deleteMessageContent,
   deleteRoom,
   getAccountByNickname,
   getContactMessageById,
@@ -46,6 +47,7 @@ export const {
   updateAccountSettings,
   updateAccountRole,
   updateContactMessageStatus,
+  updateMessageText,
   updateReportStatus,
   updateRoomTopic,
 } = database;

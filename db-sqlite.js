@@ -32,6 +32,14 @@ export async function initDatabase() {
       type TEXT NOT NULL,
       nickname TEXT NOT NULL,
       text TEXT NOT NULL,
+      author_id TEXT NOT NULL DEFAULT '',
+      reply_to_id TEXT NOT NULL DEFAULT '',
+      reply_to_nickname TEXT NOT NULL DEFAULT '',
+      reply_to_text TEXT NOT NULL DEFAULT '',
+      reply_to_deleted INTEGER NOT NULL DEFAULT 0,
+      edited_at INTEGER,
+      deleted_at INTEGER,
+      deleted_by TEXT NOT NULL DEFAULT '',
       created_at INTEGER NOT NULL,
       FOREIGN KEY (room) REFERENCES rooms(name)
     );
@@ -168,6 +176,25 @@ export async function initDatabase() {
     );
   } catch (error) {
     if (!String(error.message).includes("duplicate column")) throw error;
+  }
+
+  const messageMigrations = [
+    "ALTER TABLE messages ADD COLUMN author_id TEXT NOT NULL DEFAULT ''",
+    "ALTER TABLE messages ADD COLUMN reply_to_id TEXT NOT NULL DEFAULT ''",
+    "ALTER TABLE messages ADD COLUMN reply_to_nickname TEXT NOT NULL DEFAULT ''",
+    "ALTER TABLE messages ADD COLUMN reply_to_text TEXT NOT NULL DEFAULT ''",
+    "ALTER TABLE messages ADD COLUMN reply_to_deleted INTEGER NOT NULL DEFAULT 0",
+    "ALTER TABLE messages ADD COLUMN edited_at INTEGER",
+    "ALTER TABLE messages ADD COLUMN deleted_at INTEGER",
+    "ALTER TABLE messages ADD COLUMN deleted_by TEXT NOT NULL DEFAULT ''",
+  ];
+
+  for (const migration of messageMigrations) {
+    try {
+      db.exec(migration);
+    } catch (error) {
+      if (!String(error.message).includes("duplicate column")) throw error;
+    }
   }
 
   const insertRoom = db.prepare(`
@@ -382,7 +409,11 @@ export async function listPrivateBlocks(blocker) {
 export async function getMessageById(id) {
   return db
     .prepare(`
-      SELECT id, room, type, nickname, text, created_at AS createdAt
+      SELECT id, room, type, nickname, text, author_id AS authorId,
+        reply_to_id AS replyToId, reply_to_nickname AS replyToNickname,
+        reply_to_text AS replyToText, reply_to_deleted AS replyToDeleted,
+        edited_at AS editedAt, deleted_at AS deletedAt, deleted_by AS deletedBy,
+        created_at AS createdAt
       FROM messages
       WHERE id = ?
     `)
@@ -622,7 +653,11 @@ export async function deleteRoom(name) {
 export async function getRoomHistory(room, limit = 80) {
   return db
     .prepare(`
-      SELECT id, type, nickname, text, created_at AS createdAt
+      SELECT id, type, nickname, text, author_id AS authorId,
+        reply_to_id AS replyToId, reply_to_nickname AS replyToNickname,
+        reply_to_text AS replyToText, reply_to_deleted AS replyToDeleted,
+        edited_at AS editedAt, deleted_at AS deletedAt, deleted_by AS deletedBy,
+        created_at AS createdAt
       FROM messages
       WHERE room = ?
       ORDER BY created_at DESC
@@ -634,9 +669,68 @@ export async function getRoomHistory(room, limit = 80) {
 
 export async function saveMessage(room, message) {
   db.prepare(`
-    INSERT OR REPLACE INTO messages (id, room, type, nickname, text, created_at)
-    VALUES (?, ?, ?, ?, ?, ?)
-  `).run(message.id, room, message.type, message.nickname, message.text, message.createdAt);
+    INSERT OR REPLACE INTO messages (
+      id, room, type, nickname, text, author_id,
+      reply_to_id, reply_to_nickname, reply_to_text, reply_to_deleted,
+      edited_at, deleted_at, deleted_by, created_at
+    )
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    message.id,
+    room,
+    message.type,
+    message.nickname,
+    message.text,
+    message.authorId || "",
+    message.replyToId || "",
+    message.replyToNickname || "",
+    message.replyToText || "",
+    message.replyToDeleted ? 1 : 0,
+    message.editedAt || null,
+    message.deletedAt || null,
+    message.deletedBy || "",
+    message.createdAt
+  );
+}
+
+export async function updateMessageText(id, text, editedAt) {
+  db.exec("BEGIN");
+  try {
+    db.prepare(`
+      UPDATE messages
+      SET text = ?, edited_at = ?
+      WHERE id = ? AND deleted_at IS NULL
+    `).run(text, editedAt, id);
+    db.prepare(`
+      UPDATE messages
+      SET reply_to_text = ?
+      WHERE reply_to_id = ? AND reply_to_deleted = 0
+    `).run(text.slice(0, 160), id);
+    db.exec("COMMIT");
+  } catch (error) {
+    db.exec("ROLLBACK");
+    throw error;
+  }
+}
+
+export async function deleteMessageContent(id, deletedAt, deletedBy) {
+  db.exec("BEGIN");
+  try {
+    db.prepare(`
+      UPDATE messages
+      SET text = '', deleted_at = ?, deleted_by = ?
+      WHERE id = ? AND deleted_at IS NULL
+    `).run(deletedAt, deletedBy, id);
+    db.prepare(`
+      UPDATE messages
+      SET reply_to_text = '', reply_to_deleted = 1
+      WHERE reply_to_id = ?
+    `).run(id);
+    db.exec("COMMIT");
+  } catch (error) {
+    db.exec("ROLLBACK");
+    throw error;
+  }
 }
 
 export async function trimRoomHistory(room, limit = 250) {

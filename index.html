@@ -232,6 +232,20 @@
           </div>
 
           <form class="message-form" id="messageForm">
+            <div class="composer-context hidden" id="composerContext">
+              <div>
+                <strong id="composerContextTitle">Reponse</strong>
+                <span id="composerContextText"></span>
+              </div>
+              <button
+                id="composerContextCancel"
+                type="button"
+                aria-label="Annuler l'action"
+                title="Annuler"
+              >
+                &times;
+              </button>
+            </div>
             <div class="composer">
               <input
                 id="messageInput"
