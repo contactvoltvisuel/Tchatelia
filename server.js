@@ -120,6 +120,15 @@ const users = new Map();
 
 app.set("trust proxy", 1);
 app.use(express.json({ limit: "20kb" }));
+app.use((request, response, next) => {
+  if (
+    request.path === "/" ||
+    /\.(?:html|js|css)$/i.test(request.path)
+  ) {
+    response.setHeader("Cache-Control", "no-store");
+  }
+  next();
+});
 app.use(express.static(publicDir));
 app.use(express.static(__dirname));
 
@@ -2290,7 +2299,7 @@ function setUserTyping(user, active) {
       user.isTyping = false;
       user.typingTimeout = null;
       publishTyping(user.room);
-    }, 3_000);
+    }, 5_000);
   }
 
   if (changed) publishTyping(user.room);

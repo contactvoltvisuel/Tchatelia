@@ -148,6 +148,7 @@ let turnstileWidgetId = null;
 let activeMessageAction = null;
 let typingActive = false;
 let typingStopTimer = null;
+let lastTypingSignalAt = 0;
 const REACTION_OPTIONS = [
   { key: "like", emoji: "\u{1F44D}", label: "J'aime" },
   { key: "heart", emoji: "\u{2764}\u{FE0F}", label: "J'adore" },
@@ -2260,13 +2261,15 @@ function updateTypingState() {
     return;
   }
 
-  if (!typingActive) {
+  const now = Date.now();
+  if (!typingActive || now - lastTypingSignalAt >= 1_000) {
     typingActive = true;
+    lastTypingSignalAt = now;
     socket.emit("typing", { active: true });
   }
 
   window.clearTimeout(typingStopTimer);
-  typingStopTimer = window.setTimeout(stopTyping, 1_200);
+  typingStopTimer = window.setTimeout(stopTyping, 3_000);
 }
 
 function stopTyping() {
@@ -2274,6 +2277,7 @@ function stopTyping() {
   typingStopTimer = null;
   if (!typingActive) return;
   typingActive = false;
+  lastTypingSignalAt = 0;
   socket.emit("typing", { active: false });
 }
 
