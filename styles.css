@@ -1843,7 +1843,7 @@ button {
 }
 
 .conversation {
-  grid-template-rows: 74px minmax(0, 1fr) auto;
+  grid-template-rows: 74px auto minmax(0, 1fr) auto;
   background: var(--canvas);
 }
 
@@ -1938,6 +1938,75 @@ button {
   min-width: 18px;
   height: 18px;
   font-size: 10px;
+}
+
+.message-search {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: minmax(220px, 1fr) auto auto;
+  align-items: center;
+  gap: 9px;
+  padding: 9px max(18px, calc((100% - 820px) / 2));
+  border-bottom: 1px solid var(--line);
+  background: #f8fbfa;
+}
+
+.message-search-field {
+  min-width: 0;
+  position: relative;
+}
+
+.message-search-field > span {
+  position: absolute;
+  top: 50%;
+  left: 11px;
+  transform: translateY(-50%);
+  font-size: 13px;
+  pointer-events: none;
+}
+
+.message-search-field input {
+  min-width: 0;
+  min-height: 38px;
+  padding-left: 36px;
+  border-color: #cbd7d3;
+  background: #fff;
+}
+
+.message-search output {
+  min-width: 68px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+  text-align: right;
+  white-space: nowrap;
+}
+
+.message-search-actions {
+  display: flex;
+  gap: 4px;
+}
+
+.message-search-actions button {
+  width: 34px;
+  min-width: 34px;
+  min-height: 34px;
+  padding: 0;
+  border: 1px solid var(--line);
+  color: var(--accent-dark);
+  background: #fff;
+  font-size: 16px;
+}
+
+.message-search-actions button:hover:not(:disabled) {
+  border-color: var(--accent);
+  background: var(--soft);
+}
+
+.message-search-actions button:disabled {
+  color: #9ca9a5;
+  background: #edf1f0;
+  cursor: default;
 }
 
 .messages {
@@ -2104,6 +2173,16 @@ button {
   outline: 2px solid #bf8d28;
   outline-offset: -2px;
   background: #fff8e8;
+}
+
+.message.is-search-match {
+  background: #fff7df;
+}
+
+.message.is-search-current {
+  outline: 2px solid #bf8d28;
+  outline-offset: -2px;
+  background: #ffefbd;
 }
 
 .message-reactions {
@@ -2367,6 +2446,31 @@ button.message-reaction:hover,
   font-weight: 600;
 }
 
+.presence-control {
+  display: grid;
+  gap: 5px;
+  padding: 9px 7px 11px;
+  border-bottom: 1px solid var(--line);
+}
+
+.presence-control span {
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.presence-control select {
+  min-height: 36px;
+  padding: 0 30px 0 10px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  color: var(--ink);
+  background: #fff;
+  font-size: 12px;
+  font-weight: 700;
+}
+
 .user-list {
   display: grid;
   gap: 3px;
@@ -2424,6 +2528,37 @@ button.message-reaction:hover,
   border: 2px solid #fff;
   border-radius: 50%;
   background: #34b789;
+  z-index: 2;
+}
+
+.user-avatar.small.presence-away::after,
+.account-avatar.presence-away::after {
+  background: #d99a2b;
+}
+
+.user-avatar.small.presence-busy::after,
+.account-avatar.presence-busy::after {
+  background: #c95643;
+}
+
+.user-avatar.small.presence-online::after,
+.account-avatar.presence-online::after {
+  background: #34b789;
+}
+
+.account-avatar {
+  position: relative;
+}
+
+.account-avatar::after {
+  content: "";
+  position: absolute;
+  right: -1px;
+  bottom: -1px;
+  width: 8px;
+  height: 8px;
+  border: 2px solid #1d2e2a;
+  border-radius: 50%;
   z-index: 2;
 }
 
@@ -2864,7 +2999,7 @@ button.message-reaction:hover,
   }
 
   .conversation {
-    grid-template-rows: 66px minmax(0, 1fr) auto;
+    grid-template-rows: 66px auto minmax(0, 1fr) auto;
   }
 
   .chat-header {
@@ -2913,6 +3048,20 @@ button.message-reaction:hover,
 
   .messages {
     padding: 12px 8px;
+  }
+
+  .message-search {
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 7px;
+    padding: 8px;
+  }
+
+  .message-search-field {
+    grid-column: 1 / -1;
+  }
+
+  .message-search output {
+    text-align: left;
   }
 
   .message {

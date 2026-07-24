@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Tchatelia</title>
     <link rel="icon" href="data:," />
-    <link rel="stylesheet" href="/styles.css?v=20260724-2" />
+    <link rel="stylesheet" href="/styles.css?v=20260724-3" />
   </head>
   <body>
     <main class="shell">
@@ -192,6 +192,15 @@
               <h1 id="roomTopic">Salon general pour discuter librement.</h1>
             </div>
             <div class="chat-header-actions">
+              <button
+                class="ghost-button"
+                id="messageSearchToggleButton"
+                type="button"
+                title="Rechercher dans ce salon"
+              >
+                <span aria-hidden="true">&#128269;</span>
+                <span class="button-label">Rechercher</span>
+              </button>
               <button class="ghost-button hidden" id="privateMessagesButton" type="button">
                 <span aria-hidden="true">&#9993;</span>
                 <span class="button-label">Messages</span>
@@ -223,6 +232,49 @@
               <button class="leave-button" id="leaveButton" type="button">Sortir</button>
             </div>
           </header>
+
+          <form class="message-search hidden" id="messageSearchForm" role="search">
+            <div class="message-search-field">
+              <span aria-hidden="true">&#128269;</span>
+              <input
+                id="messageSearchInput"
+                type="search"
+                maxlength="80"
+                autocomplete="off"
+                placeholder="Rechercher un mot ou une discussion..."
+                aria-label="Rechercher dans les messages du salon"
+              />
+            </div>
+            <output id="messageSearchCount" aria-live="polite">0 resultat</output>
+            <div class="message-search-actions">
+              <button
+                id="messageSearchPrevious"
+                type="button"
+                aria-label="Resultat precedent"
+                title="Resultat precedent"
+                disabled
+              >
+                &#8593;
+              </button>
+              <button
+                id="messageSearchNext"
+                type="button"
+                aria-label="Resultat suivant"
+                title="Resultat suivant"
+                disabled
+              >
+                &#8595;
+              </button>
+              <button
+                id="messageSearchClose"
+                type="button"
+                aria-label="Fermer la recherche"
+                title="Fermer"
+              >
+                &times;
+              </button>
+            </div>
+          </form>
 
           <div class="messages" id="messages" aria-live="polite">
             <div class="messages-empty">
@@ -279,6 +331,14 @@
               &times;
             </button>
           </div>
+          <label class="presence-control" for="presenceSelect">
+            <span>Mon statut</span>
+            <select id="presenceSelect">
+              <option value="online">En ligne</option>
+              <option value="away">Absent</option>
+              <option value="busy">Occupe</option>
+            </select>
+          </label>
           <ul class="user-list" id="userList"></ul>
           <button class="moderation-button hidden" id="adminPanelButton" type="button">
             Ouvrir la moderation
@@ -620,6 +680,6 @@
     </dialog>
 
     <script src="/socket.io/socket.io.js"></script>
-    <script src="/app.js?v=20260724-2"></script>
+    <script src="/app.js?v=20260724-3"></script>
   </body>
 </html>

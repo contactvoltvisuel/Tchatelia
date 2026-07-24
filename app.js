@@ -15,8 +15,16 @@ const composerContextText = document.querySelector("#composerContextText");
 const composerContextCancel = document.querySelector("#composerContextCancel");
 const typingIndicator = document.querySelector("#typingIndicator");
 const messages = document.querySelector("#messages");
+const messageSearchToggleButton = document.querySelector("#messageSearchToggleButton");
+const messageSearchForm = document.querySelector("#messageSearchForm");
+const messageSearchInput = document.querySelector("#messageSearchInput");
+const messageSearchCount = document.querySelector("#messageSearchCount");
+const messageSearchPrevious = document.querySelector("#messageSearchPrevious");
+const messageSearchNext = document.querySelector("#messageSearchNext");
+const messageSearchClose = document.querySelector("#messageSearchClose");
 const roomList = document.querySelector("#roomList");
 const userList = document.querySelector("#userList");
+const presenceSelect = document.querySelector("#presenceSelect");
 const adminPanel = document.querySelector("#adminPanel");
 const adminUserList = document.querySelector("#adminUserList");
 const adminUnbanForm = document.querySelector("#adminUnbanForm");
@@ -127,6 +135,7 @@ let currentNickname = "";
 let currentRole = "user";
 let currentAccount = false;
 let currentAccountNickname = "";
+let currentPresenceStatus = "online";
 let currentUsers = [];
 let currentAccounts = [];
 let currentModerationLogs = [];
@@ -149,6 +158,13 @@ let activeMessageAction = null;
 let typingActive = false;
 let typingStopTimer = null;
 let lastTypingSignalAt = 0;
+let messageSearchResults = [];
+let messageSearchIndex = -1;
+const PRESENCE_LABELS = {
+  online: "En ligne",
+  away: "Absent",
+  busy: "Occupe",
+};
 const REACTION_OPTIONS = [
   { key: "like", emoji: "\u{1F44D}", label: "J'aime" },
   { key: "heart", emoji: "\u{2764}\u{FE0F}", label: "J'adore" },
@@ -243,6 +259,56 @@ messageForm.addEventListener("submit", (event) => {
 
 messageInput.addEventListener("input", updateTypingState);
 messageInput.addEventListener("blur", stopTyping);
+
+messageSearchToggleButton.addEventListener("click", () => {
+  if (messageSearchForm.classList.contains("hidden")) {
+    openMessageSearch();
+  } else {
+    closeMessageSearch();
+  }
+});
+
+messageSearchForm.addEventListener("submit", (event) => {
+  event.preventDefault();
+  if (messageSearchResults.length) goToSearchResult(1);
+});
+
+messageSearchInput.addEventListener("input", () => {
+  runMessageSearch({ focusResult: false });
+});
+
+messageSearchInput.addEventListener("keydown", (event) => {
+  if (event.key === "Escape") {
+    closeMessageSearch();
+  }
+});
+
+messageSearchPrevious.addEventListener("click", () => {
+  goToSearchResult(-1);
+});
+
+messageSearchNext.addEventListener("click", () => {
+  goToSearchResult(1);
+});
+
+messageSearchClose.addEventListener("click", closeMessageSearch);
+
+presenceSelect.addEventListener("change", () => {
+  const previousStatus = currentPresenceStatus;
+  const status = presenceSelect.value;
+  presenceSelect.disabled = true;
+  socket.emit("presence-status", { status }, (response) => {
+    presenceSelect.disabled = false;
+    if (!response?.ok) {
+      presenceSelect.value = previousStatus;
+      alert(response?.error || "Le statut n'a pas pu etre modifie.");
+      return;
+    }
+    currentPresenceStatus = response.status;
+    presenceSelect.value = response.status;
+    updateCurrentUserSummary();
+  });
+});
 
 composerContextCancel.addEventListener("click", () => {
   clearMessageAction();
@@ -619,16 +685,19 @@ socket.on("history", (history) => {
   messages.innerHTML = "";
   clearMessageAction();
   history.forEach(renderMessage);
+  runMessageSearch({ focusResult: false });
   scrollToLatest();
 });
 
 socket.on("message", (message) => {
   renderMessage(message);
-  scrollToLatest();
+  runMessageSearch({ focusResult: false, preserveCurrent: true });
+  if (messageSearchForm.classList.contains("hidden")) scrollToLatest();
 });
 
 socket.on("message-updated", (message) => {
   renderMessage(message);
+  runMessageSearch({ focusResult: false, preserveCurrent: true });
   if (activeMessageAction?.id === message.id && message.deletedAt) {
     clearMessageAction();
   }
@@ -665,7 +734,11 @@ socket.on("room-activity", (activity) => {
 socket.on("users", (users) => {
   currentUsers = users;
   const me = users.find((user) => user.nickname === currentNickname);
-  if (me) currentRole = me.role;
+  if (me) {
+    currentRole = me.role;
+    currentPresenceStatus = me.presenceStatus || "online";
+    presenceSelect.value = currentPresenceStatus;
+  }
 
   memberCount.textContent = String(users.length);
   updateCurrentUserSummary();
@@ -678,7 +751,9 @@ socket.on("users", (users) => {
     button.type = "button";
     button.className = "profile-user-button";
     button.title = `Voir le profil de ${user.nickname}`;
-    button.append(createAvatar(user, "small"));
+    const avatar = createAvatar(user, "small");
+    avatar.classList.add(`presence-${user.presenceStatus || "online"}`);
+    button.append(avatar);
 
     const copy = document.createElement("span");
     copy.className = "profile-user-copy";
@@ -687,12 +762,13 @@ socket.on("users", (users) => {
     name.textContent = user.nickname;
 
     const role = document.createElement("small");
-    role.textContent =
+    const roleLabel =
       user.role === "admin" || user.role === "moderator"
         ? formatRole(user.role)
         : user.account
           ? "membre"
           : "invite";
+    role.textContent = `${formatPresence(user.presenceStatus)} - ${roleLabel}`;
 
     copy.append(name, role);
     button.append(copy);
@@ -871,6 +947,7 @@ function switchRoom(room) {
   }
 
   stopTyping();
+  closeMessageSearch();
   socket.emit("switch-room", room, (response) => {
     if (!response?.ok) return;
     clearMessageAction();
@@ -882,6 +959,104 @@ function switchRoom(room) {
     renderRoomList();
     updateDocumentTitle();
   });
+}
+
+function openMessageSearch() {
+  messageSearchForm.classList.remove("hidden");
+  messageSearchToggleButton.setAttribute("aria-expanded", "true");
+  messageSearchInput.focus();
+  runMessageSearch({ focusResult: false });
+}
+
+function closeMessageSearch() {
+  messageSearchForm.classList.add("hidden");
+  messageSearchToggleButton.setAttribute("aria-expanded", "false");
+  messageSearchInput.value = "";
+  messageSearchResults = [];
+  messageSearchIndex = -1;
+  messageSearchCount.textContent = "0 resultat";
+  messageSearchPrevious.disabled = true;
+  messageSearchNext.disabled = true;
+  clearMessageSearchClasses();
+}
+
+function runMessageSearch({ focusResult = true, preserveCurrent = false } = {}) {
+  const query = normalizeMessageSearch(messageSearchInput.value);
+  const previousId =
+    preserveCurrent && messageSearchIndex >= 0
+      ? messageSearchResults[messageSearchIndex]
+      : "";
+  clearMessageSearchClasses();
+
+  if (!query) {
+    messageSearchResults = [];
+    messageSearchIndex = -1;
+    messageSearchCount.textContent = "0 resultat";
+    messageSearchPrevious.disabled = true;
+    messageSearchNext.disabled = true;
+    return;
+  }
+
+  const matchingRows = [...messages.querySelectorAll(".message")].filter((row) =>
+    String(row.dataset.searchText || "").includes(query)
+  );
+  messageSearchResults = matchingRows.map((row) => row.dataset.messageId);
+  messageSearchIndex = previousId
+    ? messageSearchResults.indexOf(previousId)
+    : messageSearchResults.length
+      ? 0
+      : -1;
+  if (messageSearchIndex < 0 && messageSearchResults.length) {
+    messageSearchIndex = 0;
+  }
+
+  matchingRows.forEach((row) => row.classList.add("is-search-match"));
+  const resultCount = messageSearchResults.length;
+  messageSearchCount.textContent = `${resultCount} resultat${resultCount > 1 ? "s" : ""}`;
+  messageSearchPrevious.disabled = resultCount === 0;
+  messageSearchNext.disabled = resultCount === 0;
+
+  if (resultCount) {
+    markCurrentSearchResult(focusResult);
+  }
+}
+
+function goToSearchResult(direction) {
+  if (!messageSearchResults.length) return;
+  messageSearchIndex =
+    (messageSearchIndex + direction + messageSearchResults.length) %
+    messageSearchResults.length;
+  markCurrentSearchResult(true);
+}
+
+function markCurrentSearchResult(shouldScroll) {
+  for (const row of messages.querySelectorAll(".message")) {
+    row.classList.remove("is-search-current");
+  }
+
+  const messageId = messageSearchResults[messageSearchIndex];
+  const row = [...messages.children].find(
+    (candidate) => candidate.dataset.messageId === messageId
+  );
+  if (!row) return;
+  row.classList.add("is-search-current");
+  if (shouldScroll) {
+    row.scrollIntoView({ behavior: "smooth", block: "center" });
+  }
+}
+
+function clearMessageSearchClasses() {
+  for (const row of messages.querySelectorAll(".message")) {
+    row.classList.remove("is-search-match", "is-search-current");
+  }
+}
+
+function normalizeMessageSearch(value) {
+  return String(value || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLocaleLowerCase("fr-FR")
+    .trim();
 }
 
 function openMobilePanel(panel) {
@@ -930,6 +1105,12 @@ function updateCurrentUserSummary() {
         ? "membre"
         : "invite";
   currentUserInitials.textContent = getInitials(currentNickname);
+  currentUserInitials.classList.remove(
+    "presence-online",
+    "presence-away",
+    "presence-busy"
+  );
+  currentUserInitials.classList.add(`presence-${currentPresenceStatus}`);
 }
 
 function renderAdminPanel() {
@@ -1355,6 +1536,10 @@ function formatRole(role) {
   if (role === "admin") return "admin";
   if (role === "moderator") return "moderateur";
   return "utilisateur";
+}
+
+function formatPresence(status) {
+  return PRESENCE_LABELS[status] || PRESENCE_LABELS.online;
 }
 
 function createAdminButton(label, action, nickname) {
@@ -2022,6 +2207,14 @@ function renderMessage(message) {
   const row = document.createElement("article");
   row.className = `message ${message.type}`;
   row.dataset.messageId = message.id;
+  row.dataset.searchText = normalizeMessageSearch(
+    [
+      message.nickname,
+      message.text,
+      message.replyToNickname,
+      message.replyToText,
+    ].join(" ")
+  );
 
   if (message.type === "system") {
     row.textContent = message.text;

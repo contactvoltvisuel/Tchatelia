@@ -86,6 +86,7 @@ const MESSAGE_REACTIONS = new Map([
   ["laugh", "\u{1F602}"],
   ["surprised", "\u{1F62E}"],
 ]);
+const PRESENCE_STATUSES = new Set(["online", "away", "busy"]);
 const PUBLIC_PROTECTION_ENABLED = process.env.PUBLIC_PROTECTION !== "false";
 const TURNSTILE_SITE_KEY = String(process.env.TURNSTILE_SITE_KEY || "").trim();
 const TURNSTILE_SECRET_KEY = String(process.env.TURNSTILE_SECRET_KEY || "").trim();
@@ -428,6 +429,7 @@ io.on("connection", (socket) => {
       cooldownUntil: 0,
       lastReportAt: 0,
       lastReactionAt: 0,
+      presenceStatus: "online",
       isTyping: false,
       typingTimeout: null,
       joinedAt: Date.now(),
@@ -497,6 +499,21 @@ io.on("connection", (socket) => {
     const active =
       typeof payload === "boolean" ? payload : Boolean(payload.active);
     setUserTyping(user, active);
+  });
+
+  socket.on("presence-status", (payload = {}, callback) => {
+    const user = users.get(socket.id);
+    if (!user) return;
+
+    const status = String(payload.status || "");
+    if (!PRESENCE_STATUSES.has(status)) {
+      callback?.({ ok: false, error: "Ce statut n'est pas disponible." });
+      return;
+    }
+
+    user.presenceStatus = status;
+    publishUsers(user.room);
+    callback?.({ ok: true, status });
   });
 
   socket.on("message", async (payload) => {
@@ -2367,6 +2384,9 @@ function publishUsers(room) {
       nickname: user.nickname,
       role: user.role,
       account: user.account,
+      presenceStatus: PRESENCE_STATUSES.has(user.presenceStatus)
+        ? user.presenceStatus
+        : "online",
       avatarUrl:
         user.avatarUrl && user.accountNickname
           ? `/avatar/${encodeURIComponent(user.accountNickname)}`
