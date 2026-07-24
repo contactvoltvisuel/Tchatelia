@@ -1614,6 +1614,32 @@ button {
   margin-top: 3px;
 }
 
+.account-email-field {
+  display: grid;
+  gap: 8px;
+}
+
+.account-email-field small {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.forgot-password-button {
+  width: max-content;
+  min-height: 30px;
+  justify-self: end;
+  padding: 0;
+  color: var(--accent-dark);
+  background: transparent;
+  font-size: 12px;
+}
+
+.forgot-password-button:hover {
+  color: var(--accent);
+  background: transparent;
+  text-decoration: underline;
+}
+
 .access-consent {
   padding: 9px 0;
   font-size: 12px;
@@ -1848,7 +1874,7 @@ button {
 }
 
 .conversation {
-  grid-template-rows: 74px auto minmax(0, 1fr) auto;
+  grid-template-rows: 74px auto auto minmax(0, 1fr) auto;
   background: var(--canvas);
 }
 
@@ -1950,7 +1976,7 @@ button {
   grid-row: 2;
   min-width: 0;
   display: grid;
-  grid-template-columns: minmax(220px, 1fr) auto auto;
+  grid-template-columns: minmax(220px, 1fr) auto auto auto;
   align-items: center;
   gap: 9px;
   padding: 9px max(18px, calc((100% - 820px) / 2));
@@ -2016,8 +2042,71 @@ button {
   cursor: default;
 }
 
-.messages {
+.message-favorites-filter {
+  width: auto;
+  min-height: 34px;
+  padding: 0 10px;
+  border: 1px solid var(--line);
+  color: var(--accent-dark);
+  background: #fff;
+  font-size: 11px;
+}
+
+.message-favorites-filter.is-active {
+  border-color: #c79013;
+  color: #694800;
+  background: #fff5cf;
+}
+
+.pinned-message {
   grid-row: 3;
+  min-width: 0;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+  padding: 9px max(18px, calc((100% - 820px) / 2));
+  border-bottom: 1px solid #e6d08d;
+  background: #fff9df;
+}
+
+.pinned-message-icon {
+  font-size: 17px;
+}
+
+.pinned-message-copy {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+  padding: 0;
+  color: var(--ink);
+  background: transparent;
+  text-align: left;
+}
+
+.pinned-message-copy:hover {
+  color: var(--accent-dark);
+  background: transparent;
+}
+
+.pinned-message-copy strong,
+.pinned-message-copy span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pinned-message-copy strong {
+  font-size: 11px;
+}
+
+.pinned-message-copy span {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.messages {
+  grid-row: 4;
   gap: 2px;
   padding: 18px max(18px, calc((100% - 820px) / 2));
   background: var(--canvas);
@@ -2061,6 +2150,26 @@ button {
   border: 0;
   border-radius: 7px;
   background: transparent;
+}
+
+.message.is-pinned {
+  background: #fff9df;
+}
+
+.message.is-favorite:not(.is-pinned) {
+  background: #fffdf4;
+}
+
+.message-pinned-label,
+.message-favorite-label {
+  color: #87620b;
+  font-size: 9px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.message-favorite-label {
+  font-size: 12px;
 }
 
 .message:hover {
@@ -2299,6 +2408,13 @@ button.message-reaction:hover,
   background: var(--warm);
 }
 
+.message-action-button.favorite,
+.message-action-button.pinned {
+  border-color: #d7bd69;
+  color: #694800;
+  background: #fff5cf;
+}
+
 .message-report-button {
   visibility: hidden;
   opacity: 0;
@@ -2318,7 +2434,7 @@ button.message-reaction:hover,
 }
 
 .message-form {
-  grid-row: 4;
+  grid-row: 5;
   position: static;
   grid-template-columns: minmax(0, 1fr) auto;
   gap: 9px;
@@ -2705,7 +2821,8 @@ button.message-reaction:hover,
 .profile-dialog,
 .settings-dialog,
 .private-dialog,
-.report-dialog {
+.report-dialog,
+.password-reset-dialog {
   border-radius: 8px;
 }
 
@@ -2718,6 +2835,48 @@ button.message-reaction:hover,
   color: var(--ink);
   background: #fff;
   box-shadow: var(--shadow);
+}
+
+.password-reset-dialog {
+  width: min(480px, calc(100% - 32px));
+  max-height: calc(100vh - 32px);
+  overflow-y: auto;
+  border: 1px solid var(--line);
+  padding: 28px;
+  color: var(--ink);
+  background: #fff;
+  box-shadow: var(--shadow);
+}
+
+.password-reset-dialog::backdrop {
+  background: rgba(14, 24, 21, 0.56);
+}
+
+.password-reset-copy {
+  padding-right: 40px;
+}
+
+.password-reset-copy h2 {
+  margin-bottom: 18px;
+  font-size: 24px;
+}
+
+.password-reset-form {
+  display: grid;
+  gap: 10px;
+}
+
+.password-reset-form p {
+  margin: 0 0 4px;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.password-reset-form label {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
 }
 
 .settings-header {
@@ -3008,7 +3167,7 @@ button.message-reaction:hover,
   }
 
   .conversation {
-    grid-template-rows: 66px auto minmax(0, 1fr) auto;
+    grid-template-rows: 66px auto auto minmax(0, 1fr) auto;
   }
 
   .chat-header {
@@ -3060,7 +3219,7 @@ button.message-reaction:hover,
   }
 
   .message-search {
-    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-columns: minmax(0, 1fr) auto auto;
     gap: 7px;
     padding: 8px;
   }
@@ -3071,6 +3230,10 @@ button.message-reaction:hover,
 
   .message-search output {
     text-align: left;
+  }
+
+  .pinned-message {
+    padding: 8px 10px;
   }
 
   .message {
@@ -3126,7 +3289,8 @@ button.message-reaction:hover,
 
   .profile-dialog,
   .settings-dialog,
-  .report-dialog {
+  .report-dialog,
+  .password-reset-dialog {
     width: calc(100% - 20px);
     max-height: calc(100dvh - 20px);
     padding: 22px;

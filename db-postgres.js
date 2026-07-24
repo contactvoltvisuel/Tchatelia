@@ -37,6 +37,8 @@ export async function initDatabase() {
       deleted_at BIGINT,
       deleted_by TEXT NOT NULL DEFAULT '',
       reaction_data TEXT NOT NULL DEFAULT '{}',
+      pinned_at BIGINT,
+      pinned_by TEXT NOT NULL DEFAULT '',
       created_at BIGINT NOT NULL
     );
 
@@ -57,8 +59,30 @@ export async function initDatabase() {
       bio TEXT NOT NULL DEFAULT '',
       avatar_url TEXT NOT NULL DEFAULT '',
       private_messages_enabled BOOLEAN NOT NULL DEFAULT TRUE,
+      email TEXT NOT NULL DEFAULT '',
       created_at BIGINT NOT NULL
     );
+
+    CREATE TABLE IF NOT EXISTS message_favorites (
+      account_nickname TEXT NOT NULL REFERENCES accounts(nickname) ON DELETE CASCADE,
+      message_id TEXT NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
+      created_at BIGINT NOT NULL,
+      PRIMARY KEY (account_nickname, message_id)
+    );
+
+    CREATE INDEX IF NOT EXISTS message_favorites_account_idx
+      ON message_favorites (account_nickname, created_at DESC);
+
+    CREATE TABLE IF NOT EXISTS password_reset_tokens (
+      token_hash TEXT PRIMARY KEY,
+      account_nickname TEXT NOT NULL REFERENCES accounts(nickname) ON DELETE CASCADE,
+      expires_at BIGINT NOT NULL,
+      used_at BIGINT,
+      created_at BIGINT NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS password_reset_account_idx
+      ON password_reset_tokens (account_nickname, created_at DESC);
 
     CREATE TABLE IF NOT EXISTS moderation_logs (
       id TEXT PRIMARY KEY,
@@ -149,6 +173,10 @@ export async function initDatabase() {
   await pool.query(
     "ALTER TABLE accounts ADD COLUMN IF NOT EXISTS private_messages_enabled BOOLEAN NOT NULL DEFAULT TRUE"
   );
+  await pool.query("ALTER TABLE accounts ADD COLUMN IF NOT EXISTS email TEXT NOT NULL DEFAULT ''");
+  await pool.query(
+    "CREATE UNIQUE INDEX IF NOT EXISTS accounts_email_unique_idx ON accounts(email) WHERE email <> ''"
+  );
   await pool.query("ALTER TABLE messages ADD COLUMN IF NOT EXISTS author_id TEXT NOT NULL DEFAULT ''");
   await pool.query("ALTER TABLE messages ADD COLUMN IF NOT EXISTS reply_to_id TEXT NOT NULL DEFAULT ''");
   await pool.query(
@@ -166,6 +194,8 @@ export async function initDatabase() {
   await pool.query(
     "ALTER TABLE messages ADD COLUMN IF NOT EXISTS reaction_data TEXT NOT NULL DEFAULT '{}'"
   );
+  await pool.query("ALTER TABLE messages ADD COLUMN IF NOT EXISTS pinned_at BIGINT");
+  await pool.query("ALTER TABLE messages ADD COLUMN IF NOT EXISTS pinned_by TEXT NOT NULL DEFAULT ''");
 
   for (const [name, topic] of defaultRooms) {
     await pool.query(
@@ -193,12 +223,27 @@ export async function getAccountByNickname(nickname) {
     `
       SELECT nickname, display_name AS "displayName", password_hash AS "passwordHash", salt, role, active,
         bio, avatar_url AS "avatarUrl",
-        private_messages_enabled AS "privateMessagesEnabled",
+        private_messages_enabled AS "privateMessagesEnabled", email,
         created_at AS "createdAt"
       FROM accounts
       WHERE nickname = $1
     `,
     [nickname]
+  );
+  return result.rows[0];
+}
+
+export async function getAccountByEmail(email) {
+  const result = await pool.query(
+    `
+      SELECT nickname, display_name AS "displayName", password_hash AS "passwordHash", salt, role, active,
+        bio, avatar_url AS "avatarUrl",
+        private_messages_enabled AS "privateMessagesEnabled", email,
+        created_at AS "createdAt"
+      FROM accounts
+      WHERE email = $1
+    `,
+    [email]
   );
   return result.rows[0];
 }
@@ -321,7 +366,7 @@ export async function getPrivateConversation(accountA, accountB, limit = 80) {
     `,
     [accountA, accountB, limit]
   );
-  return result.rows.reverse();
+  return result.rows;
 }
 
 export async function listPrivateMessagesForAccount(account, limit = 5000) {
@@ -407,7 +452,7 @@ export async function getMessageById(id) {
         reply_to_id AS "replyToId", reply_to_nickname AS "replyToNickname",
         reply_to_text AS "replyToText", reply_to_deleted AS "replyToDeleted",
         edited_at AS "editedAt", deleted_at AS "deletedAt", deleted_by AS "deletedBy",
-        reaction_data AS "reactionData",
+        reaction_data AS "reactionData", pinned_at AS "pinnedAt", pinned_by AS "pinnedBy",
         created_at AS "createdAt"
       FROM messages
       WHERE id = $1
@@ -585,8 +630,10 @@ export async function updateContactMessageStatus(id, status, handledBy) {
 export async function createAccount(account) {
   await pool.query(
     `
-      INSERT INTO accounts (nickname, display_name, password_hash, salt, role, active, created_at)
-      VALUES ($1, $2, $3, $4, $5, TRUE, $6)
+      INSERT INTO accounts (
+        nickname, display_name, password_hash, salt, role, active, email, created_at
+      )
+      VALUES ($1, $2, $3, $4, $5, TRUE, $6, $7)
     `,
     [
       account.nickname,
@@ -594,6 +641,7 @@ export async function createAccount(account) {
       account.passwordHash,
       account.salt,
       account.role,
+      account.email || "",
       Date.now(),
     ]
   );
@@ -627,10 +675,60 @@ export async function updateAccountSettings(nickname, settings) {
   await pool.query(
     `
       UPDATE accounts
-      SET display_name = $1, private_messages_enabled = $2
-      WHERE nickname = $3
+      SET display_name = $1, private_messages_enabled = $2, email = $3
+      WHERE nickname = $4
     `,
-    [settings.displayName, settings.privateMessagesEnabled, nickname]
+    [settings.displayName, settings.privateMessagesEnabled, settings.email, nickname]
+  );
+}
+
+export async function createPasswordResetToken(token) {
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    await client.query(
+      "DELETE FROM password_reset_tokens WHERE expires_at < $1 OR account_nickname = $2",
+      [Date.now(), token.accountNickname]
+    );
+    await client.query(
+      `
+        INSERT INTO password_reset_tokens (
+          token_hash, account_nickname, expires_at, used_at, created_at
+        )
+        VALUES ($1, $2, $3, NULL, $4)
+      `,
+      [token.tokenHash, token.accountNickname, token.expiresAt, token.createdAt]
+    );
+    await client.query("COMMIT");
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+export async function getPasswordResetToken(tokenHash) {
+  const result = await pool.query(
+    `
+      SELECT token_hash AS "tokenHash", account_nickname AS "accountNickname",
+        expires_at AS "expiresAt", used_at AS "usedAt", created_at AS "createdAt"
+      FROM password_reset_tokens
+      WHERE token_hash = $1
+    `,
+    [tokenHash]
+  );
+  return result.rows[0];
+}
+
+export async function markPasswordResetTokenUsed(tokenHash, usedAt) {
+  await pool.query(
+    `
+      UPDATE password_reset_tokens
+      SET used_at = $1
+      WHERE token_hash = $2 AND used_at IS NULL
+    `,
+    [usedAt, tokenHash]
   );
 }
 
@@ -669,6 +767,10 @@ export async function deleteAccount(nickname) {
       }
     }
     await client.query("DELETE FROM reports WHERE reporter = $1", [nickname]);
+    await client.query("DELETE FROM password_reset_tokens WHERE account_nickname = $1", [
+      nickname,
+    ]);
+    await client.query("DELETE FROM message_favorites WHERE account_nickname = $1", [nickname]);
     await client.query(
       "DELETE FROM private_blocks WHERE blocker = $1 OR blocked = $1",
       [nickname]
@@ -699,6 +801,10 @@ export async function updateRoomTopic(name, topic) {
 }
 
 export async function deleteRoom(name) {
+  await pool.query(
+    "DELETE FROM message_favorites WHERE message_id IN (SELECT id FROM messages WHERE room = $1)",
+    [name]
+  );
   await pool.query("DELETE FROM messages WHERE room = $1", [name]);
   await pool.query("DELETE FROM rooms WHERE name = $1", [name]);
 }
@@ -710,12 +816,17 @@ export async function getRoomHistory(room, limit = 80) {
         reply_to_id AS "replyToId", reply_to_nickname AS "replyToNickname",
         reply_to_text AS "replyToText", reply_to_deleted AS "replyToDeleted",
         edited_at AS "editedAt", deleted_at AS "deletedAt", deleted_by AS "deletedBy",
-        reaction_data AS "reactionData",
+        reaction_data AS "reactionData", pinned_at AS "pinnedAt", pinned_by AS "pinnedBy",
         created_at AS "createdAt"
       FROM messages
-      WHERE room = $1
-      ORDER BY created_at DESC
-      LIMIT $2
+      WHERE id IN (
+        SELECT id FROM messages
+        WHERE room = $1
+        ORDER BY created_at DESC
+        LIMIT $2
+      )
+        OR (room = $1 AND pinned_at IS NOT NULL)
+      ORDER BY created_at ASC
     `,
     [room, limit]
   );
@@ -729,9 +840,12 @@ export async function saveMessage(room, message) {
       INSERT INTO messages (
         id, room, type, nickname, text, author_id,
         reply_to_id, reply_to_nickname, reply_to_text, reply_to_deleted,
-        edited_at, deleted_at, deleted_by, reaction_data, created_at
+        edited_at, deleted_at, deleted_by, reaction_data, pinned_at, pinned_by, created_at
       )
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+      VALUES (
+        $1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
+        $11, $12, $13, $14, $15, $16, $17
+      )
       ON CONFLICT (id) DO UPDATE SET
         room = EXCLUDED.room,
         type = EXCLUDED.type,
@@ -746,6 +860,8 @@ export async function saveMessage(room, message) {
         deleted_at = EXCLUDED.deleted_at,
         deleted_by = EXCLUDED.deleted_by,
         reaction_data = EXCLUDED.reaction_data,
+        pinned_at = EXCLUDED.pinned_at,
+        pinned_by = EXCLUDED.pinned_by,
         created_at = EXCLUDED.created_at
     `,
     [
@@ -763,6 +879,8 @@ export async function saveMessage(room, message) {
       message.deletedAt || null,
       message.deletedBy || "",
       message.reactionData || "{}",
+      message.pinnedAt || null,
+      message.pinnedBy || "",
       message.createdAt,
     ]
   );
@@ -804,7 +922,8 @@ export async function deleteMessageContent(id, deletedAt, deletedBy) {
     await client.query(
       `
         UPDATE messages
-        SET text = '', deleted_at = $1, deleted_by = $2, reaction_data = '{}'
+        SET text = '', deleted_at = $1, deleted_by = $2, reaction_data = '{}',
+          pinned_at = NULL, pinned_by = ''
         WHERE id = $3 AND deleted_at IS NULL
       `,
       [deletedAt, deletedBy, id]
@@ -817,6 +936,7 @@ export async function deleteMessageContent(id, deletedAt, deletedBy) {
       `,
       [id]
     );
+    await client.query("DELETE FROM message_favorites WHERE message_id = $1", [id]);
     await client.query("COMMIT");
   } catch (error) {
     await client.query("ROLLBACK");
@@ -837,11 +957,82 @@ export async function updateMessageReactions(id, reactionData) {
   );
 }
 
+export async function setMessageFavorite(accountNickname, messageId, favorite) {
+  if (favorite) {
+    await pool.query(
+      `
+        INSERT INTO message_favorites (account_nickname, message_id, created_at)
+        VALUES ($1, $2, $3)
+        ON CONFLICT (account_nickname, message_id) DO NOTHING
+      `,
+      [accountNickname, messageId, Date.now()]
+    );
+    return;
+  }
+  await pool.query(
+    "DELETE FROM message_favorites WHERE account_nickname = $1 AND message_id = $2",
+    [accountNickname, messageId]
+  );
+}
+
+export async function listFavoriteMessageIds(accountNickname) {
+  const result = await pool.query(
+    "SELECT message_id AS \"messageId\" FROM message_favorites WHERE account_nickname = $1",
+    [accountNickname]
+  );
+  return result.rows.map((row) => row.messageId);
+}
+
+export async function setPinnedMessage(room, messageId, pinnedAt, pinnedBy) {
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    await client.query(
+      "UPDATE messages SET pinned_at = NULL, pinned_by = '' WHERE room = $1",
+      [room]
+    );
+    if (messageId) {
+      await client.query(
+        `
+          UPDATE messages
+          SET pinned_at = $1, pinned_by = $2
+          WHERE id = $3 AND room = $4 AND deleted_at IS NULL AND type != 'system'
+        `,
+        [pinnedAt, pinnedBy, messageId, room]
+      );
+    }
+    await client.query("COMMIT");
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
 export async function trimRoomHistory(room, limit = 250) {
+  await pool.query(
+    `
+      DELETE FROM message_favorites
+      WHERE message_id IN (
+          SELECT id FROM messages
+          WHERE room = $1
+            AND pinned_at IS NULL
+            AND id NOT IN (
+            SELECT id FROM messages
+            WHERE room = $1
+            ORDER BY created_at DESC
+            LIMIT $2
+          )
+      )
+    `,
+    [room, limit]
+  );
   await pool.query(
     `
       DELETE FROM messages
       WHERE room = $1
+        AND pinned_at IS NULL
         AND id NOT IN (
           SELECT id FROM messages
           WHERE room = $1

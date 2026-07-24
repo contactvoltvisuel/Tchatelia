@@ -2,6 +2,7 @@ import "./config.js";
 import express from "express";
 import { createServer } from "node:http";
 import {
+  createHash,
   createHmac,
   randomBytes,
   randomUUID,
@@ -17,18 +18,21 @@ import {
   banNickname,
   createContactMessage,
   createAccount,
+  createPasswordResetToken,
   createReport,
   createRoom,
   deleteAccount,
   deleteMessageContent,
   deleteRoom,
   getAccountByNickname,
+  getAccountByEmail,
   getContactMessageById,
   getDatabaseLabel,
   getMessageById,
   getPrivateBlockState,
   getPrivateConversation,
   getPrivateMessageById,
+  getPasswordResetToken,
   getReportById,
   getRoomHistory,
   getRooms,
@@ -38,17 +42,21 @@ import {
   listAccounts,
   listContactMessages,
   listModerationLogs,
+  listFavoriteMessageIds,
   listPrivateBlocks,
   listPrivateMessagesForAccount,
   listReports,
   listSecurityEvents,
   markPrivateMessagesRead,
+  markPasswordResetTokenUsed,
   savePrivateMessage,
   saveMessage,
   saveModerationLog,
   saveSecurityEvent,
   setAccountActive,
   setPrivateBlock,
+  setMessageFavorite,
+  setPinnedMessage,
   trimRoomHistory,
   unbanNickname,
   updateAccountPassword,
@@ -91,6 +99,16 @@ const PUBLIC_PROTECTION_ENABLED = process.env.PUBLIC_PROTECTION !== "false";
 const TURNSTILE_SITE_KEY = String(process.env.TURNSTILE_SITE_KEY || "").trim();
 const TURNSTILE_SECRET_KEY = String(process.env.TURNSTILE_SECRET_KEY || "").trim();
 const TURNSTILE_ENABLED = Boolean(TURNSTILE_SITE_KEY && TURNSTILE_SECRET_KEY);
+const BREVO_API_KEY = String(process.env.BREVO_API_KEY || "").trim();
+const MAIL_FROM_EMAIL = normalizeEmail(process.env.MAIL_FROM_EMAIL);
+const MAIL_FROM_NAME = String(process.env.MAIL_FROM_NAME || "Tchatelia").trim().slice(0, 70);
+const PUBLIC_URL = String(process.env.PUBLIC_URL || "").trim().replace(/\/+$/, "");
+const PASSWORD_RESET_ENABLED = Boolean(
+  BREVO_API_KEY && isValidEmail(MAIL_FROM_EMAIL)
+);
+const PASSWORD_RESET_TTL_MS = 30 * 60_000;
+const PASSWORD_RESET_WINDOW_MS = 60 * 60_000;
+const MAX_PASSWORD_RESET_REQUESTS = 3;
 const SECURITY_HASH_SECRET =
   process.env.SECURITY_HASH_SECRET || ADMIN_PASSWORD || "tchatelia-security";
 const AUTH_WINDOW_MS = 10 * 60_000;
@@ -102,6 +120,7 @@ const MAX_REGISTRATIONS = 3;
 const MAX_CONNECTIONS_PER_IDENTITY = 8;
 const contactRateLimits = new Map();
 const protectionStates = new Map();
+const passwordResetRateLimits = new Map();
 
 await initDatabase();
 
@@ -111,7 +130,10 @@ const rooms = new Map(
       room.name,
       {
         topic: room.topic,
-        history: await getRoomHistory(room.name, MAX_HISTORY),
+        history: limitRoomHistory(
+          await getRoomHistory(room.name, MAX_HISTORY),
+          MAX_HISTORY
+        ),
       },
     ])
   )
@@ -150,6 +172,7 @@ app.get("/api/public-config", (request, response) => {
     publicProtection: PUBLIC_PROTECTION_ENABLED,
     turnstileEnabled: TURNSTILE_ENABLED,
     turnstileSiteKey: TURNSTILE_ENABLED ? TURNSTILE_SITE_KEY : "",
+    passwordResetEnabled: PASSWORD_RESET_ENABLED,
   });
 });
 
@@ -243,12 +266,112 @@ app.post("/api/contact", async (request, response) => {
 });
 
 io.on("connection", (socket) => {
+  socket.on("password-reset-request", async (payload = {}, callback) => {
+    if (!PASSWORD_RESET_ENABLED) {
+      callback?.({
+        ok: false,
+        error: "La recuperation par e-mail n'est pas encore configuree.",
+      });
+      return;
+    }
+
+    const identity = getSecurityIdentity(socket);
+    if (!canRequestPasswordReset(identity.hash)) {
+      callback?.({
+        ok: false,
+        error: "Trop de demandes. Reessaie dans une heure.",
+      });
+      return;
+    }
+
+    const email = normalizeEmail(payload.email);
+    if (!isValidEmail(email)) {
+      callback?.({ ok: false, error: "Saisis une adresse e-mail valide." });
+      return;
+    }
+
+    const genericResponse = {
+      ok: true,
+      message: "Si cette adresse correspond a un compte, un e-mail vient d'etre envoye.",
+    };
+
+    try {
+      const account = await getAccountByEmail(email);
+      if (account) {
+        const rawToken = randomBytes(32).toString("hex");
+        const createdAt = Date.now();
+        await createPasswordResetToken({
+          tokenHash: hashResetToken(rawToken),
+          accountNickname: account.nickname,
+          expiresAt: createdAt + PASSWORD_RESET_TTL_MS,
+          createdAt,
+        });
+        await sendPasswordResetEmail(
+          account,
+          buildPasswordResetUrl(socket, rawToken)
+        );
+      }
+      callback?.(genericResponse);
+    } catch (error) {
+      console.error("Erreur recuperation du mot de passe:", error.message);
+      callback?.(genericResponse);
+    }
+  });
+
+  socket.on("password-reset-confirm", async (payload = {}, callback) => {
+    const token = String(payload.token || "").trim();
+    const newPassword = String(payload.newPassword || "");
+    if (!/^[a-f0-9]{64}$/i.test(token)) {
+      callback?.({ ok: false, error: "Ce lien de recuperation est invalide." });
+      return;
+    }
+    if (newPassword.length < 8) {
+      callback?.({
+        ok: false,
+        error: "Le nouveau mot de passe doit faire au moins 8 caracteres.",
+      });
+      return;
+    }
+
+    try {
+      const tokenRecord = await getPasswordResetToken(hashResetToken(token));
+      if (
+        !tokenRecord ||
+        tokenRecord.usedAt ||
+        Number(tokenRecord.expiresAt) < Date.now()
+      ) {
+        callback?.({
+          ok: false,
+          error: "Ce lien est expire ou a deja ete utilise.",
+        });
+        return;
+      }
+
+      await updateAccountPassword(
+        tokenRecord.accountNickname,
+        await hashPassword(newPassword)
+      );
+      await markPasswordResetTokenUsed(tokenRecord.tokenHash, Date.now());
+      callback?.({
+        ok: true,
+        message: "Mot de passe modifie. Tu peux maintenant te connecter.",
+      });
+    } catch (error) {
+      console.error("Erreur nouveau mot de passe:", error.message);
+      callback?.({
+        ok: false,
+        error: "Le mot de passe n'a pas pu etre modifie. Reessaie plus tard.",
+      });
+    }
+  });
+
   socket.on("join", async (
     {
       nickname,
       room,
       adminPassword,
       accountPassword,
+      accountEmail,
       authMode,
       legalAccepted,
       turnstileToken,
@@ -262,6 +385,7 @@ io.on("connection", (socket) => {
     const isAdmin = String(adminPassword || "") === ADMIN_PASSWORD;
     const cleanAuthMode = ["guest", "login", "register"].includes(authMode) ? authMode : "guest";
     const cleanAccountPassword = String(accountPassword || "");
+    const cleanAccountEmail = normalizeEmail(accountEmail);
     const securityIdentity = getSecurityIdentity(socket);
 
     if (legalAccepted !== true) {
@@ -326,11 +450,27 @@ io.on("connection", (socket) => {
         return;
       }
 
+      if (!isValidEmail(cleanAccountEmail)) {
+        callback?.({
+          ok: false,
+          error: "Une adresse e-mail valide est necessaire pour recuperer le compte.",
+        });
+        return;
+      }
+
       const existingAccount = await findAccountByIdentity(cleanNickname);
       if (existingAccount) {
         callback?.({
           ok: false,
           error: "Ce pseudo est deja reserve. Connecte-toi avec le mot de passe du compte.",
+        });
+        return;
+      }
+
+      if (await getAccountByEmail(cleanAccountEmail)) {
+        callback?.({
+          ok: false,
+          error: "Cette adresse e-mail est deja associee a un compte.",
         });
         return;
       }
@@ -342,6 +482,7 @@ io.on("connection", (socket) => {
         passwordHash: passwordRecord.passwordHash,
         salt: passwordRecord.salt,
         role: isAdmin ? "admin" : "user",
+        email: cleanAccountEmail,
       });
     }
 
@@ -395,6 +536,10 @@ io.on("connection", (socket) => {
     registerSuccessfulAccess(securityIdentity.hash, cleanAuthMode);
     const role = account?.role || (isAdmin ? "admin" : "user");
     const displayName = account?.displayName || cleanNickname;
+    const favoriteMessageIds =
+      account || cleanAuthMode === "register"
+        ? await listFavoriteMessageIds(accountNickname)
+        : [];
 
     if (
       (await isBanned(normalizedNickname)) ||
@@ -429,6 +574,7 @@ io.on("connection", (socket) => {
       cooldownUntil: 0,
       lastReportAt: 0,
       lastReactionAt: 0,
+      favoriteMessageIds: new Set(favoriteMessageIds),
       presenceStatus: "online",
       isTyping: false,
       typingTimeout: null,
@@ -652,7 +798,7 @@ io.on("connection", (socket) => {
     if (!user) return;
 
     const action = String(payload.action || "");
-    if (!["edit", "delete", "react"].includes(action)) return;
+    if (!["edit", "delete", "react", "favorite", "pin", "unpin"].includes(action)) return;
 
     const targetMessage = await getMessageById(String(payload.id || ""));
     if (
@@ -669,6 +815,95 @@ io.on("connection", (socket) => {
       Boolean(targetMessage.authorId) &&
       targetMessage.authorId === user.messageAuthorId;
     const canModerate = MODERATION_ROLES.has(user.role);
+
+    if (action === "favorite") {
+      if (!user.accountNickname) {
+        callback?.({
+          ok: false,
+          error: "Connecte-toi avec un compte pour enregistrer un favori.",
+        });
+        return;
+      }
+
+      const favorite = !user.favoriteMessageIds.has(targetMessage.id);
+      await setMessageFavorite(user.accountNickname, targetMessage.id, favorite);
+      if (favorite) {
+        user.favoriteMessageIds.add(targetMessage.id);
+      } else {
+        user.favoriteMessageIds.delete(targetMessage.id);
+      }
+      const storedMessage =
+        rooms.get(user.room).history.find((message) => message.id === targetMessage.id) ||
+        targetMessage;
+      for (const [socketId, connectedUser] of users.entries()) {
+        if (connectedUser.accountNickname !== user.accountNickname) continue;
+        if (favorite) {
+          connectedUser.favoriteMessageIds.add(targetMessage.id);
+        } else {
+          connectedUser.favoriteMessageIds.delete(targetMessage.id);
+        }
+        if (connectedUser.room === user.room) {
+          io.to(socketId).emit(
+            "message-updated",
+            serializeMessageForUser(storedMessage, connectedUser)
+          );
+        }
+      }
+      callback?.({ ok: true, favorite });
+      return;
+    }
+
+    if (action === "pin" || action === "unpin") {
+      if (!canModerate) {
+        callback?.({
+          ok: false,
+          error: "Seuls les moderateurs peuvent epingler une annonce.",
+        });
+        return;
+      }
+      if (action === "unpin" && !targetMessage.pinnedAt) {
+        callback?.({ ok: false, error: "Ce message n'est pas epingle." });
+        return;
+      }
+
+      const room = rooms.get(user.room);
+      const changedMessages = new Map();
+      for (const message of room.history) {
+        if (!message.pinnedAt) continue;
+        message.pinnedAt = null;
+        message.pinnedBy = "";
+        changedMessages.set(message.id, message);
+      }
+
+      if (action === "pin") {
+        const storedMessage =
+          room.history.find((message) => message.id === targetMessage.id) ||
+          targetMessage;
+        storedMessage.pinnedAt = Date.now();
+        storedMessage.pinnedBy = user.nickname;
+        changedMessages.set(storedMessage.id, storedMessage);
+        await setPinnedMessage(
+          user.room,
+          storedMessage.id,
+          storedMessage.pinnedAt,
+          user.nickname
+        );
+      } else {
+        await setPinnedMessage(user.room, "", null, "");
+      }
+
+      for (const message of changedMessages.values()) {
+        emitMessageToRoom("message-updated", user.room, message);
+      }
+      await recordModerationAction(
+        user,
+        action === "pin" ? "message_pinned" : "message_unpinned",
+        targetMessage.nickname,
+        `Message ${action === "pin" ? "epingle" : "desepingle"} dans #${user.room}`
+      );
+      callback?.({ ok: true });
+      return;
+    }
 
     if (action === "react") {
       if (!user.accountNickname) {
@@ -767,6 +1002,11 @@ io.on("connection", (socket) => {
     storedMessage.deletedAt = deletedAt;
     storedMessage.deletedBy = deletedBy;
     storedMessage.reactionData = "{}";
+    storedMessage.pinnedAt = null;
+    storedMessage.pinnedBy = "";
+    for (const connectedUser of users.values()) {
+      connectedUser.favoriteMessageIds?.delete(targetMessage.id);
+    }
     emitMessageToRoom("message-updated", user.room, storedMessage);
 
     for (const replyMessage of room.history) {
@@ -954,6 +1194,96 @@ function cleanName(value) {
       .replace(/[^\p{L}\p{N}_-]/gu, "")
       .slice(0, 18) || fallback
   );
+}
+
+function normalizeEmail(value) {
+  return String(value || "").trim().toLocaleLowerCase("fr-FR").slice(0, 254);
+}
+
+function isValidEmail(value) {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value) && value.length <= 254;
+}
+
+function hashResetToken(token) {
+  return createHash("sha256").update(String(token || "")).digest("hex");
+}
+
+function canRequestPasswordReset(identityHash) {
+  const now = Date.now();
+  const recentRequests = keepRecent(
+    passwordResetRateLimits.get(identityHash) || [],
+    PASSWORD_RESET_WINDOW_MS,
+    now
+  );
+  if (recentRequests.length >= MAX_PASSWORD_RESET_REQUESTS) {
+    passwordResetRateLimits.set(identityHash, recentRequests);
+    return false;
+  }
+  recentRequests.push(now);
+  passwordResetRateLimits.set(identityHash, recentRequests);
+
+  if (passwordResetRateLimits.size > 5000) {
+    for (const [key, timestamps] of passwordResetRateLimits.entries()) {
+      const recent = keepRecent(timestamps, PASSWORD_RESET_WINDOW_MS, now);
+      if (recent.length) {
+        passwordResetRateLimits.set(key, recent);
+      } else {
+        passwordResetRateLimits.delete(key);
+      }
+    }
+  }
+  return true;
+}
+
+function buildPasswordResetUrl(socket, token) {
+  let baseUrl = PUBLIC_URL;
+  if (!/^https?:\/\/[^/]+/i.test(baseUrl)) {
+    const origin = String(socket.handshake.headers.origin || "").replace(/\/+$/, "");
+    if (/^https?:\/\/[^/]+/i.test(origin)) {
+      baseUrl = origin;
+    } else {
+      const protocol = String(socket.handshake.headers["x-forwarded-proto"] || "http")
+        .split(",")[0]
+        .trim();
+      const host = String(socket.handshake.headers.host || `localhost:${PORT}`);
+      baseUrl = `${protocol}://${host}`;
+    }
+  }
+  return `${baseUrl}/?resetToken=${encodeURIComponent(token)}`;
+}
+
+async function sendPasswordResetEmail(account, resetUrl) {
+  const response = await fetch("https://api.brevo.com/v3/smtp/email", {
+    method: "POST",
+    headers: {
+      accept: "application/json",
+      "api-key": BREVO_API_KEY,
+      "content-type": "application/json",
+    },
+    body: JSON.stringify({
+      sender: {
+        name: MAIL_FROM_NAME || "Tchatelia",
+        email: MAIL_FROM_EMAIL,
+      },
+      to: [
+        {
+          email: account.email,
+          name: account.displayName,
+        },
+      ],
+      subject: "Reinitialisation de ton mot de passe Tchatelia",
+      textContent:
+        `Bonjour ${account.displayName},\n\n` +
+        "Une demande de reinitialisation a ete faite pour ton compte Tchatelia.\n\n" +
+        `Choisis un nouveau mot de passe avec ce lien valable 30 minutes :\n${resetUrl}\n\n` +
+        "Si tu n'es pas a l'origine de cette demande, ignore simplement cet e-mail.",
+    }),
+  });
+
+  if (!response.ok) {
+    const details = (await response.text()).slice(0, 300);
+    throw new Error(`Brevo ${response.status}: ${details}`);
+  }
 }
 
 function normalizeName(value) {
@@ -1271,6 +1601,7 @@ async function buildAccountSettings(accountNickname) {
   return {
     accountNickname: account.nickname,
     displayName: account.displayName,
+    email: account.email || "",
     privateMessagesEnabled: Boolean(account.privateMessagesEnabled),
     blockedUsers: blockedUsers.map((blockedUser) => ({
       accountNickname: blockedUser.blocked,
@@ -1323,9 +1654,26 @@ async function handleSettingsAction(socket, user, payload, callback) {
     }
 
     const privateMessagesEnabled = payload.privateMessagesEnabled === true;
+    const email = normalizeEmail(payload.email);
+    if (!isValidEmail(email)) {
+      callback?.({
+        ok: false,
+        error: "Saisis une adresse e-mail valide pour recuperer ton compte.",
+      });
+      return;
+    }
+    const accountWithEmail = await getAccountByEmail(email);
+    if (accountWithEmail && accountWithEmail.nickname !== account.nickname) {
+      callback?.({
+        ok: false,
+        error: "Cette adresse e-mail est deja associee a un autre compte.",
+      });
+      return;
+    }
     await updateAccountSettings(account.nickname, {
       displayName,
       privateMessagesEnabled,
+      email,
     });
     updateConnectedAccount(account.nickname, {
       nickname: displayName,
@@ -2190,13 +2538,25 @@ async function handleModeration(socket, admin, action, rawTarget) {
 async function addMessage(room, message, senderSocketId = "") {
   const currentRoom = rooms.get(room);
   currentRoom.history.push(message);
-  currentRoom.history = currentRoom.history.slice(-MAX_HISTORY);
+  currentRoom.history = limitRoomHistory(currentRoom.history, MAX_HISTORY);
   await saveMessage(room, message);
   await trimRoomHistory(room);
   emitMessageToRoom("message", room, message);
   if (message.type !== "system") {
     publishRoomActivity(room, message, senderSocketId);
   }
+}
+
+function limitRoomHistory(history, limit) {
+  if (history.length <= limit) return history;
+  const pinnedMessage = history.find((message) => message.pinnedAt && !message.deletedAt);
+  const latestMessages = history.slice(-limit);
+  if (!pinnedMessage || latestMessages.some((message) => message.id === pinnedMessage.id)) {
+    return latestMessages;
+  }
+  return [pinnedMessage, ...history.slice(-(limit - 1))].sort(
+    (first, second) => Number(first.createdAt) - Number(second.createdAt)
+  );
 }
 
 function sendRoomHistory(socket, user, room) {
@@ -2248,10 +2608,15 @@ function serializeMessageForUser(message, user) {
     editedAt: Number(message.editedAt) || null,
     deletedAt,
     deletedBy: message.deletedBy || "",
+    pinnedAt: deletedAt ? null : Number(message.pinnedAt) || null,
+    pinnedBy: deletedAt ? "" : message.pinnedBy || "",
     createdAt: Number(message.createdAt),
     canEdit: canManage && isOwner,
     canDelete: canManage && (isOwner || canModerate),
     canReact: canManage && Boolean(user?.accountNickname),
+    canFavorite: canManage && Boolean(user?.accountNickname),
+    isFavorite: canManage && Boolean(user?.favoriteMessageIds?.has(message.id)),
+    canPin: canManage && canModerate,
     reactions,
   };
 }

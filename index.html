@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Tchatelia</title>
     <link rel="icon" href="data:," />
-    <link rel="stylesheet" href="/styles.css?v=20260724-4" />
+    <link rel="stylesheet" href="/styles.css?v=20260724-5" />
   </head>
   <body>
     <main class="shell">
@@ -64,6 +64,23 @@
             autocomplete="current-password"
             placeholder="Connexion ou inscription"
           />
+
+          <div class="account-email-field hidden" id="accountEmailField">
+            <label for="accountEmail">Adresse e-mail</label>
+            <input
+              id="accountEmail"
+              name="accountEmail"
+              type="email"
+              maxlength="254"
+              autocomplete="email"
+              placeholder="ton@email.fr"
+            />
+            <small>Utilisee uniquement pour recuperer ton compte.</small>
+          </div>
+
+          <button class="forgot-password-button hidden" id="forgotPasswordButton" type="button">
+            Mot de passe oublie ?
+          </button>
 
           <label for="room">Salon</label>
           <select id="room" name="room">
@@ -201,6 +218,15 @@
                 <span aria-hidden="true">&#128269;</span>
                 <span class="button-label">Rechercher</span>
               </button>
+              <button
+                class="ghost-button hidden"
+                id="favoriteMessagesButton"
+                type="button"
+                title="Afficher mes messages favoris"
+              >
+                <span aria-hidden="true">&#9733;</span>
+                <span class="button-label">Favoris</span>
+              </button>
               <button class="ghost-button hidden" id="privateMessagesButton" type="button">
                 <span aria-hidden="true">&#9993;</span>
                 <span class="button-label">Messages</span>
@@ -246,6 +272,15 @@
               />
             </div>
             <output id="messageSearchCount" aria-live="polite">0 resultat</output>
+            <button
+              class="message-favorites-filter hidden"
+              id="messageFavoritesFilter"
+              type="button"
+              aria-pressed="false"
+              title="Limiter la recherche aux favoris"
+            >
+              &#9733; Favoris
+            </button>
             <div class="message-search-actions">
               <button
                 id="messageSearchPrevious"
@@ -275,6 +310,14 @@
               </button>
             </div>
           </form>
+
+          <aside class="pinned-message hidden" id="pinnedMessageBanner" aria-live="polite">
+            <span class="pinned-message-icon" aria-hidden="true">&#128204;</span>
+            <button class="pinned-message-copy" id="pinnedMessageJump" type="button">
+              <strong id="pinnedMessageAuthor">Annonce epinglee</strong>
+              <span id="pinnedMessageText"></span>
+            </button>
+          </aside>
 
           <div class="messages" id="messages" aria-live="polite">
             <div class="messages-empty">
@@ -536,6 +579,14 @@
             autocomplete="nickname"
             required
           />
+          <label for="settingsEmail">Adresse e-mail de recuperation</label>
+          <input
+            id="settingsEmail"
+            type="email"
+            maxlength="254"
+            autocomplete="email"
+            required
+          />
           <label class="settings-toggle">
             <span>
               <strong>Notifications</strong>
@@ -614,6 +665,54 @@
       </form>
     </dialog>
 
+    <dialog class="password-reset-dialog" id="passwordResetDialog">
+      <button
+        class="profile-close-button"
+        id="passwordResetCloseButton"
+        type="button"
+        aria-label="Fermer"
+      >
+        X
+      </button>
+      <div class="password-reset-copy">
+        <p class="eyebrow">Compte Tchatelia</p>
+        <h2 id="passwordResetTitle">Recuperer mon mot de passe</h2>
+      </div>
+      <form class="password-reset-form" id="passwordResetRequestForm">
+        <p>Nous enverrons un lien valable 30 minutes a l'adresse de ton compte.</p>
+        <label for="passwordResetEmail">Adresse e-mail</label>
+        <input
+          id="passwordResetEmail"
+          type="email"
+          maxlength="254"
+          autocomplete="email"
+          required
+        />
+        <button type="submit">Envoyer le lien</button>
+      </form>
+      <form class="password-reset-form hidden" id="passwordResetConfirmForm">
+        <p>Choisis un nouveau mot de passe pour ton compte.</p>
+        <label for="passwordResetNewPassword">Nouveau mot de passe</label>
+        <input
+          id="passwordResetNewPassword"
+          type="password"
+          minlength="8"
+          autocomplete="new-password"
+          required
+        />
+        <label for="passwordResetConfirmPassword">Confirmer le mot de passe</label>
+        <input
+          id="passwordResetConfirmPassword"
+          type="password"
+          minlength="8"
+          autocomplete="new-password"
+          required
+        />
+        <button type="submit">Modifier le mot de passe</button>
+      </form>
+      <p class="settings-status" id="passwordResetStatus" role="status"></p>
+    </dialog>
+
     <dialog class="private-dialog" id="privateDialog">
       <button class="profile-close-button" id="privateCloseButton" type="button" aria-label="Fermer">
         X
@@ -680,6 +779,6 @@
     </dialog>
 
     <script src="/socket.io/socket.io.js"></script>
-    <script src="/app.js?v=20260724-4"></script>
+    <script src="/app.js?v=20260724-5"></script>
   </body>
 </html>

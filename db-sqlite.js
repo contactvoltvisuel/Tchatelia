@@ -41,6 +41,8 @@ export async function initDatabase() {
       deleted_at INTEGER,
       deleted_by TEXT NOT NULL DEFAULT '',
       reaction_data TEXT NOT NULL DEFAULT '{}',
+      pinned_at INTEGER,
+      pinned_by TEXT NOT NULL DEFAULT '',
       created_at INTEGER NOT NULL,
       FOREIGN KEY (room) REFERENCES rooms(name)
     );
@@ -62,8 +64,33 @@ export async function initDatabase() {
       bio TEXT NOT NULL DEFAULT '',
       avatar_url TEXT NOT NULL DEFAULT '',
       private_messages_enabled INTEGER NOT NULL DEFAULT 1,
+      email TEXT NOT NULL DEFAULT '',
       created_at INTEGER NOT NULL
     );
+
+    CREATE TABLE IF NOT EXISTS message_favorites (
+      account_nickname TEXT NOT NULL,
+      message_id TEXT NOT NULL,
+      created_at INTEGER NOT NULL,
+      PRIMARY KEY (account_nickname, message_id),
+      FOREIGN KEY (account_nickname) REFERENCES accounts(nickname),
+      FOREIGN KEY (message_id) REFERENCES messages(id)
+    );
+
+    CREATE INDEX IF NOT EXISTS message_favorites_account_idx
+      ON message_favorites (account_nickname, created_at DESC);
+
+    CREATE TABLE IF NOT EXISTS password_reset_tokens (
+      token_hash TEXT PRIMARY KEY,
+      account_nickname TEXT NOT NULL,
+      expires_at INTEGER NOT NULL,
+      used_at INTEGER,
+      created_at INTEGER NOT NULL,
+      FOREIGN KEY (account_nickname) REFERENCES accounts(nickname)
+    );
+
+    CREATE INDEX IF NOT EXISTS password_reset_account_idx
+      ON password_reset_tokens (account_nickname, created_at DESC);
 
     CREATE TABLE IF NOT EXISTS moderation_logs (
       id TEXT PRIMARY KEY,
@@ -179,6 +206,16 @@ export async function initDatabase() {
     if (!String(error.message).includes("duplicate column")) throw error;
   }
 
+  try {
+    db.exec("ALTER TABLE accounts ADD COLUMN email TEXT NOT NULL DEFAULT ''");
+  } catch (error) {
+    if (!String(error.message).includes("duplicate column")) throw error;
+  }
+
+  db.exec(
+    "CREATE UNIQUE INDEX IF NOT EXISTS accounts_email_unique_idx ON accounts(email) WHERE email <> ''"
+  );
+
   const messageMigrations = [
     "ALTER TABLE messages ADD COLUMN author_id TEXT NOT NULL DEFAULT ''",
     "ALTER TABLE messages ADD COLUMN reply_to_id TEXT NOT NULL DEFAULT ''",
@@ -189,6 +226,8 @@ export async function initDatabase() {
     "ALTER TABLE messages ADD COLUMN deleted_at INTEGER",
     "ALTER TABLE messages ADD COLUMN deleted_by TEXT NOT NULL DEFAULT ''",
     "ALTER TABLE messages ADD COLUMN reaction_data TEXT NOT NULL DEFAULT '{}'",
+    "ALTER TABLE messages ADD COLUMN pinned_at INTEGER",
+    "ALTER TABLE messages ADD COLUMN pinned_by TEXT NOT NULL DEFAULT ''",
   ];
 
   for (const migration of messageMigrations) {
@@ -222,12 +261,25 @@ export async function getAccountByNickname(nickname) {
     .prepare(`
       SELECT nickname, display_name AS displayName, password_hash AS passwordHash, salt, role, active,
         bio, avatar_url AS avatarUrl,
-        private_messages_enabled AS privateMessagesEnabled,
+        private_messages_enabled AS privateMessagesEnabled, email,
         created_at AS createdAt
       FROM accounts
       WHERE nickname = ?
     `)
     .get(nickname);
+}
+
+export async function getAccountByEmail(email) {
+  return db
+    .prepare(`
+      SELECT nickname, display_name AS displayName, password_hash AS passwordHash, salt, role, active,
+        bio, avatar_url AS avatarUrl,
+        private_messages_enabled AS privateMessagesEnabled, email,
+        created_at AS createdAt
+      FROM accounts
+      WHERE email = ?
+    `)
+    .get(email);
 }
 
 export async function listAccounts() {
@@ -415,7 +467,7 @@ export async function getMessageById(id) {
         reply_to_id AS replyToId, reply_to_nickname AS replyToNickname,
         reply_to_text AS replyToText, reply_to_deleted AS replyToDeleted,
         edited_at AS editedAt, deleted_at AS deletedAt, deleted_by AS deletedBy,
-        reaction_data AS reactionData,
+        reaction_data AS reactionData, pinned_at AS pinnedAt, pinned_by AS pinnedBy,
         created_at AS createdAt
       FROM messages
       WHERE id = ?
@@ -568,8 +620,10 @@ export async function updateContactMessageStatus(id, status, handledBy) {
 
 export async function createAccount(account) {
   db.prepare(`
-    INSERT INTO accounts (nickname, display_name, password_hash, salt, role, active, created_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO accounts (
+      nickname, display_name, password_hash, salt, role, active, email, created_at
+    )
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
     account.nickname,
     account.displayName,
@@ -577,6 +631,7 @@ export async function createAccount(account) {
     account.salt,
     account.role,
     1,
+    account.email || "",
     Date.now()
   );
 }
@@ -608,13 +663,53 @@ export async function updateAccountProfile(nickname, profile) {
 export async function updateAccountSettings(nickname, settings) {
   db.prepare(`
     UPDATE accounts
-    SET display_name = ?, private_messages_enabled = ?
+    SET display_name = ?, private_messages_enabled = ?, email = ?
     WHERE nickname = ?
   `).run(
     settings.displayName,
     settings.privateMessagesEnabled ? 1 : 0,
+    settings.email,
     nickname
   );
+}
+
+export async function createPasswordResetToken(token) {
+  db.exec("BEGIN");
+  try {
+    db.prepare("DELETE FROM password_reset_tokens WHERE expires_at < ? OR account_nickname = ?").run(
+      Date.now(),
+      token.accountNickname
+    );
+    db.prepare(`
+      INSERT INTO password_reset_tokens (
+        token_hash, account_nickname, expires_at, used_at, created_at
+      )
+      VALUES (?, ?, ?, NULL, ?)
+    `).run(token.tokenHash, token.accountNickname, token.expiresAt, token.createdAt);
+    db.exec("COMMIT");
+  } catch (error) {
+    db.exec("ROLLBACK");
+    throw error;
+  }
+}
+
+export async function getPasswordResetToken(tokenHash) {
+  return db
+    .prepare(`
+      SELECT token_hash AS tokenHash, account_nickname AS accountNickname,
+        expires_at AS expiresAt, used_at AS usedAt, created_at AS createdAt
+      FROM password_reset_tokens
+      WHERE token_hash = ?
+    `)
+    .get(tokenHash);
+}
+
+export async function markPasswordResetTokenUsed(tokenHash, usedAt) {
+  db.prepare(`
+    UPDATE password_reset_tokens
+    SET used_at = ?
+    WHERE token_hash = ? AND used_at IS NULL
+  `).run(usedAt, tokenHash);
 }
 
 export async function deleteAccount(nickname) {
@@ -649,6 +744,8 @@ export async function deleteAccount(nickname) {
       if (changed) updateReactions.run(JSON.stringify(reactions), row.id);
     }
     db.prepare("DELETE FROM reports WHERE reporter = ?").run(nickname);
+    db.prepare("DELETE FROM password_reset_tokens WHERE account_nickname = ?").run(nickname);
+    db.prepare("DELETE FROM message_favorites WHERE account_nickname = ?").run(nickname);
     db.prepare("DELETE FROM private_blocks WHERE blocker = ? OR blocked = ?").run(
       nickname,
       nickname
@@ -677,6 +774,10 @@ export async function updateRoomTopic(name, topic) {
 }
 
 export async function deleteRoom(name) {
+  db.prepare(`
+    DELETE FROM message_favorites
+    WHERE message_id IN (SELECT id FROM messages WHERE room = ?)
+  `).run(name);
   db.prepare("DELETE FROM messages WHERE room = ?").run(name);
   db.prepare("DELETE FROM rooms WHERE name = ?").run(name);
 }
@@ -688,15 +789,19 @@ export async function getRoomHistory(room, limit = 80) {
         reply_to_id AS replyToId, reply_to_nickname AS replyToNickname,
         reply_to_text AS replyToText, reply_to_deleted AS replyToDeleted,
         edited_at AS editedAt, deleted_at AS deletedAt, deleted_by AS deletedBy,
-        reaction_data AS reactionData,
+        reaction_data AS reactionData, pinned_at AS pinnedAt, pinned_by AS pinnedBy,
         created_at AS createdAt
       FROM messages
-      WHERE room = ?
-      ORDER BY created_at DESC
-      LIMIT ?
+      WHERE id IN (
+        SELECT id FROM messages
+        WHERE room = ?
+        ORDER BY created_at DESC
+        LIMIT ?
+      )
+        OR (room = ? AND pinned_at IS NOT NULL)
+      ORDER BY created_at ASC
     `)
-    .all(room, limit)
-    .reverse();
+    .all(room, limit, room);
 }
 
 export async function saveMessage(room, message) {
@@ -704,9 +809,9 @@ export async function saveMessage(room, message) {
     INSERT OR REPLACE INTO messages (
       id, room, type, nickname, text, author_id,
       reply_to_id, reply_to_nickname, reply_to_text, reply_to_deleted,
-      edited_at, deleted_at, deleted_by, reaction_data, created_at
+      edited_at, deleted_at, deleted_by, reaction_data, pinned_at, pinned_by, created_at
     )
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
     message.id,
     room,
@@ -722,6 +827,8 @@ export async function saveMessage(room, message) {
     message.deletedAt || null,
     message.deletedBy || "",
     message.reactionData || "{}",
+    message.pinnedAt || null,
+    message.pinnedBy || "",
     message.createdAt
   );
 }
@@ -751,7 +858,8 @@ export async function deleteMessageContent(id, deletedAt, deletedBy) {
   try {
     db.prepare(`
       UPDATE messages
-      SET text = '', deleted_at = ?, deleted_by = ?, reaction_data = '{}'
+      SET text = '', deleted_at = ?, deleted_by = ?, reaction_data = '{}',
+        pinned_at = NULL, pinned_by = ''
       WHERE id = ? AND deleted_at IS NULL
     `).run(deletedAt, deletedBy, id);
     db.prepare(`
@@ -759,6 +867,7 @@ export async function deleteMessageContent(id, deletedAt, deletedBy) {
       SET reply_to_text = '', reply_to_deleted = 1
       WHERE reply_to_id = ?
     `).run(id);
+    db.prepare("DELETE FROM message_favorites WHERE message_id = ?").run(id);
     db.exec("COMMIT");
   } catch (error) {
     db.exec("ROLLBACK");
@@ -774,10 +883,72 @@ export async function updateMessageReactions(id, reactionData) {
   `).run(reactionData, id);
 }
 
+export async function setMessageFavorite(accountNickname, messageId, favorite) {
+  if (favorite) {
+    db.prepare(`
+      INSERT OR IGNORE INTO message_favorites (account_nickname, message_id, created_at)
+      VALUES (?, ?, ?)
+    `).run(accountNickname, messageId, Date.now());
+    return;
+  }
+  db.prepare(`
+    DELETE FROM message_favorites
+    WHERE account_nickname = ? AND message_id = ?
+  `).run(accountNickname, messageId);
+}
+
+export async function listFavoriteMessageIds(accountNickname) {
+  return db
+    .prepare(`
+      SELECT message_id AS messageId
+      FROM message_favorites
+      WHERE account_nickname = ?
+    `)
+    .all(accountNickname)
+    .map((row) => row.messageId);
+}
+
+export async function setPinnedMessage(room, messageId, pinnedAt, pinnedBy) {
+  db.exec("BEGIN");
+  try {
+    db.prepare(`
+      UPDATE messages
+      SET pinned_at = NULL, pinned_by = ''
+      WHERE room = ?
+    `).run(room);
+    if (messageId) {
+      db.prepare(`
+        UPDATE messages
+        SET pinned_at = ?, pinned_by = ?
+        WHERE id = ? AND room = ? AND deleted_at IS NULL AND type != 'system'
+      `).run(pinnedAt, pinnedBy, messageId, room);
+    }
+    db.exec("COMMIT");
+  } catch (error) {
+    db.exec("ROLLBACK");
+    throw error;
+  }
+}
+
 export async function trimRoomHistory(room, limit = 250) {
+  db.prepare(`
+    DELETE FROM message_favorites
+    WHERE message_id IN (
+      SELECT id FROM messages
+      WHERE room = ?
+        AND pinned_at IS NULL
+        AND id NOT IN (
+          SELECT id FROM messages
+          WHERE room = ?
+          ORDER BY created_at DESC
+          LIMIT ?
+        )
+    )
+  `).run(room, room, limit);
   db.prepare(`
     DELETE FROM messages
     WHERE room = ?
+      AND pinned_at IS NULL
       AND id NOT IN (
         SELECT id FROM messages
         WHERE room = ?

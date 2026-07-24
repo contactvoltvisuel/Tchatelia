@@ -20,6 +20,7 @@ Prerequis : Node.js 24 ou plus recent.
 - Indicateur de saisie en temps reel et reactions persistantes aux messages pour les comptes.
 - Statuts de presence en temps reel : en ligne, absent ou occupe.
 - Recherche par mot, phrase ou pseudo dans les messages charges du salon actuel.
+- Favoris personnels persistants et annonces epinglees par les moderateurs dans chaque salon.
 - Mentions avec `@pseudo`, mise en evidence et alerte cliquable.
 - Compteurs de messages non lus pour chaque salon et dans l'onglet du navigateur.
 - Alertes visuelles, sonores et notifications navigateur activables.
@@ -40,6 +41,7 @@ Prerequis : Node.js 24 ou plus recent.
 - Protection publique : limites de connexion et d'inscription, verrouillage apres plusieurs echecs
   et journal de securite reserve aux administrateurs.
 - Verification anti-robot Cloudflare Turnstile activable gratuitement.
+- Recuperation du mot de passe par e-mail avec un lien unique valable 30 minutes.
 - Commandes simples : `/me texte`, `/clear` et `/help`.
 
 ## Architecture simple
@@ -124,6 +126,22 @@ TURNSTILE_SECRET_KEY=
 
 Ne jamais publier `SECURITY_HASH_SECRET` ou `TURNSTILE_SECRET_KEY` sur GitHub.
 
+## Recuperation du mot de passe
+
+La recuperation utilise l'envoi transactionnel Brevo. Creer une cle API Brevo et verifier
+l'adresse d'expedition, puis ajouter ces variables dans Render :
+
+```text
+PUBLIC_URL=https://tchatelia.onrender.com
+BREVO_API_KEY=xkeysib-...
+MAIL_FROM_EMAIL=adresse-verifiee@example.com
+MAIL_FROM_NAME=Tchatelia
+```
+
+`BREVO_API_KEY` doit rester secrete et ne doit jamais etre ajoutee dans GitHub. Les comptes
+existants peuvent renseigner leur adresse dans `Parametres`. Une adresse e-mail est obligatoire
+pour les nouvelles inscriptions.
+
 Il est aussi possible de le changer au lancement :
 
 ```bash
@@ -148,7 +166,8 @@ Pour une premiere mise en ligne gratuite :
 6. Utiliser `npm install` comme commande d'installation.
 7. Utiliser `npm start` comme commande de demarrage.
 8. Ajouter dans Render les variables `ADMIN_PASSWORD`, `DATABASE_URL`, `DATABASE_SSL=true`,
-   `PUBLIC_PROTECTION=true` et `SECURITY_HASH_SECRET`.
+   `PUBLIC_PROTECTION=true`, `SECURITY_HASH_SECRET`, `PUBLIC_URL`, `BREVO_API_KEY`,
+   `MAIL_FROM_EMAIL` et `MAIL_FROM_NAME`.
 
 Important : utiliser `npm install`, pas `npm ci`, car Render doit installer la
 dependance PostgreSQL `pg` a partir de `package.json`.

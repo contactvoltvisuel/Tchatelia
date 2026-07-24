@@ -4,6 +4,9 @@ const loginPanel = document.querySelector("#loginPanel");
 const chatPanel = document.querySelector("#chatPanel");
 const loginForm = document.querySelector("#loginForm");
 const accountPasswordInput = document.querySelector("#accountPassword");
+const accountEmailField = document.querySelector("#accountEmailField");
+const accountEmailInput = document.querySelector("#accountEmail");
+const forgotPasswordButton = document.querySelector("#forgotPasswordButton");
 const authModeInputs = document.querySelectorAll('input[name="authMode"]');
 const loginSecurity = document.querySelector("#loginSecurity");
 const turnstileWidget = document.querySelector("#turnstileWidget");
@@ -22,6 +25,12 @@ const messageSearchCount = document.querySelector("#messageSearchCount");
 const messageSearchPrevious = document.querySelector("#messageSearchPrevious");
 const messageSearchNext = document.querySelector("#messageSearchNext");
 const messageSearchClose = document.querySelector("#messageSearchClose");
+const favoriteMessagesButton = document.querySelector("#favoriteMessagesButton");
+const messageFavoritesFilter = document.querySelector("#messageFavoritesFilter");
+const pinnedMessageBanner = document.querySelector("#pinnedMessageBanner");
+const pinnedMessageJump = document.querySelector("#pinnedMessageJump");
+const pinnedMessageAuthor = document.querySelector("#pinnedMessageAuthor");
+const pinnedMessageText = document.querySelector("#pinnedMessageText");
 const roomList = document.querySelector("#roomList");
 const userList = document.querySelector("#userList");
 const presenceSelect = document.querySelector("#presenceSelect");
@@ -115,6 +124,7 @@ const settingsCloseButton = document.querySelector("#settingsCloseButton");
 const settingsAccountNickname = document.querySelector("#settingsAccountNickname");
 const settingsGeneralForm = document.querySelector("#settingsGeneralForm");
 const settingsDisplayName = document.querySelector("#settingsDisplayName");
+const settingsEmail = document.querySelector("#settingsEmail");
 const settingsNotifications = document.querySelector("#settingsNotifications");
 const settingsPrivateMessages = document.querySelector("#settingsPrivateMessages");
 const settingsGeneralStatus = document.querySelector("#settingsGeneralStatus");
@@ -129,6 +139,15 @@ const settingsDeleteForm = document.querySelector("#settingsDeleteForm");
 const settingsDeletePassword = document.querySelector("#settingsDeletePassword");
 const settingsDeleteConfirm = document.querySelector("#settingsDeleteConfirm");
 const settingsDeleteStatus = document.querySelector("#settingsDeleteStatus");
+const passwordResetDialog = document.querySelector("#passwordResetDialog");
+const passwordResetCloseButton = document.querySelector("#passwordResetCloseButton");
+const passwordResetTitle = document.querySelector("#passwordResetTitle");
+const passwordResetRequestForm = document.querySelector("#passwordResetRequestForm");
+const passwordResetEmail = document.querySelector("#passwordResetEmail");
+const passwordResetConfirmForm = document.querySelector("#passwordResetConfirmForm");
+const passwordResetNewPassword = document.querySelector("#passwordResetNewPassword");
+const passwordResetConfirmPassword = document.querySelector("#passwordResetConfirmPassword");
+const passwordResetStatus = document.querySelector("#passwordResetStatus");
 
 let currentRoom = "accueil";
 let currentNickname = "";
@@ -160,6 +179,10 @@ let typingStopTimer = null;
 let lastTypingSignalAt = 0;
 let messageSearchResults = [];
 let messageSearchIndex = -1;
+let favoritesOnly = false;
+let passwordResetEnabled = false;
+let activePasswordResetToken = "";
+const currentRoomMessages = new Map();
 const PRESENCE_LABELS = {
   online: "En ligne",
   away: "Absent",
@@ -179,6 +202,7 @@ const unreadByRoom = new Map();
 
 initializePublicProtection();
 updateAuthModeRequirements();
+openPasswordResetConfirmationFromUrl();
 
 authModeInputs.forEach((input) => {
   input.addEventListener("change", updateAuthModeRequirements);
@@ -197,6 +221,7 @@ loginForm.addEventListener("submit", (event) => {
       room: data.get("room"),
       adminPassword: data.get("adminPassword"),
       accountPassword: data.get("accountPassword"),
+      accountEmail: data.get("accountEmail"),
       authMode: data.get("authMode"),
       legalAccepted: data.get("legalAccepted") === "on",
       turnstileToken,
@@ -292,6 +317,98 @@ messageSearchNext.addEventListener("click", () => {
 });
 
 messageSearchClose.addEventListener("click", closeMessageSearch);
+
+favoriteMessagesButton.addEventListener("click", () => {
+  if (!currentAccount) return;
+  favoritesOnly = true;
+  openMessageSearch();
+  updateFavoritesFilter();
+  runMessageSearch({ focusResult: true });
+});
+
+messageFavoritesFilter.addEventListener("click", () => {
+  favoritesOnly = !favoritesOnly;
+  updateFavoritesFilter();
+  runMessageSearch({ focusResult: true });
+});
+
+pinnedMessageJump.addEventListener("click", () => {
+  const pinnedMessage = [...currentRoomMessages.values()].find(
+    (message) => message.pinnedAt && !message.deletedAt
+  );
+  if (pinnedMessage) focusReferencedMessage(pinnedMessage.id);
+});
+
+forgotPasswordButton.addEventListener("click", () => {
+  activePasswordResetToken = "";
+  passwordResetTitle.textContent = "Recuperer mon mot de passe";
+  passwordResetRequestForm.classList.remove("hidden");
+  passwordResetConfirmForm.classList.add("hidden");
+  passwordResetRequestForm.reset();
+  setSettingsStatus(passwordResetStatus, "");
+  if (!passwordResetDialog.open) passwordResetDialog.showModal();
+  passwordResetEmail.focus();
+});
+
+passwordResetCloseButton.addEventListener("click", () => {
+  passwordResetDialog.close();
+});
+
+passwordResetDialog.addEventListener("click", (event) => {
+  if (event.target === passwordResetDialog) passwordResetDialog.close();
+});
+
+passwordResetRequestForm.addEventListener("submit", (event) => {
+  event.preventDefault();
+  const submitButton = passwordResetRequestForm.querySelector('button[type="submit"]');
+  submitButton.disabled = true;
+  setSettingsStatus(passwordResetStatus, "Envoi en cours...");
+  socket.emit(
+    "password-reset-request",
+    { email: passwordResetEmail.value },
+    (response) => {
+      submitButton.disabled = false;
+      setSettingsStatus(
+        passwordResetStatus,
+        response?.message || response?.error || "La demande n'a pas pu etre envoyee.",
+        !response?.ok
+      );
+      if (response?.ok) passwordResetRequestForm.reset();
+    }
+  );
+});
+
+passwordResetConfirmForm.addEventListener("submit", (event) => {
+  event.preventDefault();
+  if (passwordResetNewPassword.value !== passwordResetConfirmPassword.value) {
+    setSettingsStatus(passwordResetStatus, "Les deux mots de passe sont differents.", true);
+    return;
+  }
+
+  const submitButton = passwordResetConfirmForm.querySelector('button[type="submit"]');
+  submitButton.disabled = true;
+  setSettingsStatus(passwordResetStatus, "Modification...");
+  socket.emit(
+    "password-reset-confirm",
+    {
+      token: activePasswordResetToken,
+      newPassword: passwordResetNewPassword.value,
+    },
+    (response) => {
+      submitButton.disabled = false;
+      setSettingsStatus(
+        passwordResetStatus,
+        response?.message || response?.error || "Le mot de passe n'a pas pu etre modifie.",
+        !response?.ok
+      );
+      if (!response?.ok) return;
+      passwordResetConfirmForm.reset();
+      activePasswordResetToken = "";
+      window.history.replaceState({}, document.title, window.location.pathname);
+      window.setTimeout(() => passwordResetDialog.close(), 1400);
+    }
+  );
+});
 
 presenceSelect.addEventListener("change", () => {
   const previousStatus = currentPresenceStatus;
@@ -405,6 +522,7 @@ settingsGeneralForm.addEventListener("submit", async (event) => {
     {
       action: "update",
       displayName: settingsDisplayName.value,
+      email: settingsEmail.value,
       privateMessagesEnabled: settingsPrivateMessages.checked,
     },
     (response) => {
@@ -683,20 +801,29 @@ adminRefreshContactsButton.addEventListener("click", () => {
 
 socket.on("history", (history) => {
   messages.innerHTML = "";
+  currentRoomMessages.clear();
   clearMessageAction();
-  history.forEach(renderMessage);
+  history.forEach((message) => {
+    currentRoomMessages.set(message.id, message);
+    renderMessage(message);
+  });
+  renderPinnedMessage();
   runMessageSearch({ focusResult: false });
   scrollToLatest();
 });
 
 socket.on("message", (message) => {
+  currentRoomMessages.set(message.id, message);
   renderMessage(message);
+  renderPinnedMessage();
   runMessageSearch({ focusResult: false, preserveCurrent: true });
   if (messageSearchForm.classList.contains("hidden")) scrollToLatest();
 });
 
 socket.on("message-updated", (message) => {
+  currentRoomMessages.set(message.id, message);
   renderMessage(message);
+  renderPinnedMessage();
   runMessageSearch({ focusResult: false, preserveCurrent: true });
   if (activeMessageAction?.id === message.id && message.deletedAt) {
     clearMessageAction();
@@ -948,6 +1075,7 @@ function switchRoom(room) {
 
   stopTyping();
   closeMessageSearch();
+  pinnedMessageBanner.classList.add("hidden");
   socket.emit("switch-room", room, (response) => {
     if (!response?.ok) return;
     clearMessageAction();
@@ -964,6 +1092,7 @@ function switchRoom(room) {
 function openMessageSearch() {
   messageSearchForm.classList.remove("hidden");
   messageSearchToggleButton.setAttribute("aria-expanded", "true");
+  updateFavoritesFilter();
   messageSearchInput.focus();
   runMessageSearch({ focusResult: false });
 }
@@ -972,6 +1101,8 @@ function closeMessageSearch() {
   messageSearchForm.classList.add("hidden");
   messageSearchToggleButton.setAttribute("aria-expanded", "false");
   messageSearchInput.value = "";
+  favoritesOnly = false;
+  updateFavoritesFilter();
   messageSearchResults = [];
   messageSearchIndex = -1;
   messageSearchCount.textContent = "0 resultat";
@@ -988,7 +1119,7 @@ function runMessageSearch({ focusResult = true, preserveCurrent = false } = {}) 
       : "";
   clearMessageSearchClasses();
 
-  if (!query) {
+  if (!query && !favoritesOnly) {
     messageSearchResults = [];
     messageSearchIndex = -1;
     messageSearchCount.textContent = "0 resultat";
@@ -997,8 +1128,10 @@ function runMessageSearch({ focusResult = true, preserveCurrent = false } = {}) 
     return;
   }
 
-  const matchingRows = [...messages.querySelectorAll(".message")].filter((row) =>
-    String(row.dataset.searchText || "").includes(query)
+  const matchingRows = [...messages.querySelectorAll(".message")].filter(
+    (row) =>
+      (!favoritesOnly || row.dataset.favorite === "true") &&
+      (!query || String(row.dataset.searchText || "").includes(query))
   );
   messageSearchResults = matchingRows.map((row) => row.dataset.messageId);
   messageSearchIndex = previousId
@@ -1019,6 +1152,12 @@ function runMessageSearch({ focusResult = true, preserveCurrent = false } = {}) 
   if (resultCount) {
     markCurrentSearchResult(focusResult);
   }
+}
+
+function updateFavoritesFilter() {
+  messageFavoritesFilter.classList.toggle("hidden", !currentAccount);
+  messageFavoritesFilter.classList.toggle("is-active", favoritesOnly);
+  messageFavoritesFilter.setAttribute("aria-pressed", String(favoritesOnly));
 }
 
 function goToSearchResult(direction) {
@@ -1082,6 +1221,8 @@ function showChat(response) {
   roomTopic.textContent = response.topic;
   myProfileButton.classList.toggle("hidden", !currentAccount);
   privateMessagesButton.classList.toggle("hidden", !currentAccount);
+  favoriteMessagesButton.classList.toggle("hidden", !currentAccount);
+  messageFavoritesFilter.classList.toggle("hidden", !currentAccount);
   sidebarProfileButton.classList.toggle("hidden", !currentAccount);
   accountSettingsButton.classList.toggle("hidden", !currentAccount);
   updateCurrentUserSummary();
@@ -1602,6 +1743,7 @@ function renderAccountSettings(settings) {
   if (!settings) return;
   settingsAccountNickname.textContent = settings.accountNickname;
   settingsDisplayName.value = settings.displayName;
+  settingsEmail.value = settings.email || "";
   settingsNotifications.checked = alertsEnabled;
   settingsPrivateMessages.checked = settings.privateMessagesEnabled;
   settingsBlockedList.innerHTML = "";
@@ -1960,6 +2102,12 @@ function updateAuthModeRequirements() {
   const mode = document.querySelector('input[name="authMode"]:checked')?.value;
   accountPasswordInput.required = mode === "login" || mode === "register";
   accountPasswordInput.minLength = mode === "register" ? 8 : 0;
+  accountEmailField.classList.toggle("hidden", mode !== "register");
+  accountEmailInput.required = mode === "register";
+  forgotPasswordButton.classList.toggle(
+    "hidden",
+    mode !== "login" || !passwordResetEnabled
+  );
   accountPasswordInput.placeholder =
     mode === "register"
       ? "8 caracteres minimum"
@@ -1975,6 +2123,8 @@ async function initializePublicProtection() {
     });
     if (!response.ok) return;
     const config = await response.json();
+    passwordResetEnabled = Boolean(config.passwordResetEnabled);
+    updateAuthModeRequirements();
     if (!config.turnstileEnabled || !config.turnstileSiteKey) return;
 
     loginSecurity.classList.remove("hidden");
@@ -1996,6 +2146,19 @@ async function initializePublicProtection() {
   } catch {
     loginSecurity.classList.add("hidden");
   }
+}
+
+function openPasswordResetConfirmationFromUrl() {
+  const token = new URLSearchParams(window.location.search).get("resetToken") || "";
+  if (!/^[a-f0-9]{64}$/i.test(token)) return;
+
+  activePasswordResetToken = token;
+  passwordResetTitle.textContent = "Choisir un nouveau mot de passe";
+  passwordResetRequestForm.classList.add("hidden");
+  passwordResetConfirmForm.classList.remove("hidden");
+  setSettingsStatus(passwordResetStatus, "");
+  if (!passwordResetDialog.open) passwordResetDialog.showModal();
+  passwordResetNewPassword.focus();
 }
 
 function loadTurnstileScript() {
@@ -2222,6 +2385,9 @@ function renderMessage(message) {
       message.replyToText,
     ].join(" ")
   );
+  row.dataset.favorite = String(Boolean(message.isFavorite));
+  row.classList.toggle("is-pinned", Boolean(message.pinnedAt));
+  row.classList.toggle("is-favorite", Boolean(message.isFavorite));
 
   if (message.type === "system") {
     row.textContent = message.text;
@@ -2258,6 +2424,22 @@ function renderMessage(message) {
     edited.textContent = "modifie";
     edited.title = "Ce message a ete modifie";
     content.querySelector(".message-meta").append(edited);
+  }
+
+  if (message.pinnedAt && !message.deletedAt) {
+    const pinned = document.createElement("span");
+    pinned.className = "message-pinned-label";
+    pinned.textContent = "epingle";
+    pinned.title = `Epingle par ${message.pinnedBy || "la moderation"}`;
+    content.querySelector(".message-meta").append(pinned);
+  }
+
+  if (message.isFavorite && !message.deletedAt) {
+    const favorite = document.createElement("span");
+    favorite.className = "message-favorite-label";
+    favorite.textContent = "\u2605";
+    favorite.title = "Message favori";
+    content.querySelector(".message-meta").append(favorite);
   }
 
   if (message.replyToId && !message.deletedAt) {
@@ -2346,6 +2528,26 @@ function renderMessage(message) {
           );
         },
         "danger"
+      )
+    );
+  }
+
+  if (message.canFavorite) {
+    actions.append(
+      createMessageActionButton(
+        message.isFavorite ? "Retirer des favoris" : "Favori",
+        () => toggleMessageFavorite(message.id),
+        message.isFavorite ? "favorite" : ""
+      )
+    );
+  }
+
+  if (message.canPin) {
+    actions.append(
+      createMessageActionButton(
+        message.pinnedAt ? "Desepingler" : "Epingler",
+        () => togglePinnedMessage(message),
+        message.pinnedAt ? "pinned" : ""
       )
     );
   }
@@ -2455,6 +2657,43 @@ function toggleMessageReaction(messageId, reaction) {
   );
 }
 
+function toggleMessageFavorite(messageId) {
+  socket.emit(
+    "message-action",
+    {
+      action: "favorite",
+      id: messageId,
+    },
+    (response) => {
+      if (!response?.ok) {
+        alert(response?.error || "Le favori n'a pas pu etre enregistre.");
+      }
+    }
+  );
+}
+
+function togglePinnedMessage(message) {
+  const action = message.pinnedAt ? "unpin" : "pin";
+  if (
+    action === "pin" &&
+    !confirm("Epingler ce message comme annonce du salon ?")
+  ) {
+    return;
+  }
+  socket.emit(
+    "message-action",
+    {
+      action,
+      id: message.id,
+    },
+    (response) => {
+      if (!response?.ok) {
+        alert(response?.error || "L'annonce epinglee n'a pas pu etre modifiee.");
+      }
+    }
+  );
+}
+
 function updateTypingState() {
   if (!messageInput.value.trim()) {
     stopTyping();
@@ -2509,6 +2748,26 @@ function placeMessageRow(row, messageId) {
   } else {
     messages.append(row);
   }
+}
+
+function renderPinnedMessage() {
+  const pinnedMessage = [...currentRoomMessages.values()]
+    .filter((message) => message.pinnedAt && !message.deletedAt)
+    .sort((first, second) => Number(second.pinnedAt) - Number(first.pinnedAt))[0];
+
+  if (!pinnedMessage) {
+    pinnedMessageBanner.classList.add("hidden");
+    pinnedMessageAuthor.textContent = "Annonce epinglee";
+    pinnedMessageText.textContent = "";
+    return;
+  }
+
+  pinnedMessageAuthor.textContent = `${pinnedMessage.nickname} - annonce epinglee`;
+  pinnedMessageText.textContent =
+    pinnedMessage.text.length > 180
+      ? `${pinnedMessage.text.slice(0, 177)}...`
+      : pinnedMessage.text;
+  pinnedMessageBanner.classList.remove("hidden");
 }
 
 function setMessageAction(mode, message) {
