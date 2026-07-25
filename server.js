@@ -84,12 +84,23 @@ import {
   shouldHideAccountContentFromUser,
   shouldHideMessageFromUser,
 } from "./blocking.js";
+import {
+  getNewPasswordError,
+  isAllowedOrigin,
+  MAX_PASSWORD_LENGTH,
+  MIN_PASSWORD_LENGTH,
+} from "./security.js";
 
 const scrypt = promisify(scryptCallback);
 
 const app = express();
 const httpServer = createServer(app);
-const io = new Server(httpServer);
+const io = new Server(httpServer, {
+  maxHttpBufferSize: 512 * 1024,
+  allowRequest: (request, callback) => {
+    callback(null, isRequestOriginAllowed(request));
+  },
+});
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const publicDir = join(__dirname, "public");
 const publicIndex = join(publicDir, "index.html");
@@ -165,7 +176,69 @@ const rooms = new Map(
 const users = new Map();
 
 app.set("trust proxy", 1);
+app.disable("x-powered-by");
+app.use((request, response, next) => {
+  const contentSecurityPolicy = [
+    "default-src 'self'",
+    "base-uri 'self'",
+    "connect-src 'self' wss: https://challenges.cloudflare.com",
+    "font-src 'self'",
+    "form-action 'self'",
+    "frame-ancestors 'none'",
+    "frame-src https://challenges.cloudflare.com",
+    "img-src 'self' data: blob: https: http:",
+    "manifest-src 'self'",
+    "object-src 'none'",
+    "script-src 'self' https://challenges.cloudflare.com",
+    "style-src 'self'",
+  ].join("; ");
+
+  response.setHeader("Content-Security-Policy", contentSecurityPolicy);
+  response.setHeader("Cross-Origin-Opener-Policy", "same-origin-allow-popups");
+  response.setHeader("Cross-Origin-Resource-Policy", "same-origin");
+  response.setHeader("Permissions-Policy", "camera=(), geolocation=(), microphone=(), payment=(), usb=()");
+  response.setHeader("Referrer-Policy", "no-referrer");
+  response.setHeader("X-Content-Type-Options", "nosniff");
+  response.setHeader("X-Frame-Options", "DENY");
+
+  const forwardedProtocol = String(
+    request.headers["x-forwarded-proto"] || ""
+  )
+    .split(",")[0]
+    .trim();
+  if (request.secure || forwardedProtocol === "https") {
+    response.setHeader(
+      "Strict-Transport-Security",
+      "max-age=31536000; includeSubDomains"
+    );
+  }
+  next();
+});
+app.use((request, response, next) => {
+  const changesState = ["POST", "PUT", "PATCH", "DELETE"].includes(
+    request.method
+  );
+  if (changesState && !isRequestOriginAllowed(request)) {
+    response.status(403).json({
+      ok: false,
+      error: "Cette requete n'est pas autorisee.",
+    });
+    return;
+  }
+  next();
+});
 app.use(express.json({ limit: "20kb" }));
+app.use((error, request, response, next) => {
+  if (error?.type === "entity.too.large") {
+    response.status(413).json({ ok: false, error: "Requete trop volumineuse." });
+    return;
+  }
+  if (error instanceof SyntaxError && "body" in error) {
+    response.status(400).json({ ok: false, error: "Requete invalide." });
+    return;
+  }
+  next(error);
+});
 app.use((request, response, next) => {
   if (
     request.path === "/" ||
@@ -197,6 +270,8 @@ app.get("/api/public-config", (request, response) => {
     turnstileSiteKey: TURNSTILE_ENABLED ? TURNSTILE_SITE_KEY : "",
     passwordResetEnabled: PASSWORD_RESET_ENABLED,
     emailVerificationEnabled: EMAIL_VERIFICATION_ENABLED,
+    minPasswordLength: MIN_PASSWORD_LENGTH,
+    maxPasswordLength: MAX_PASSWORD_LENGTH,
   });
 });
 
@@ -259,7 +334,13 @@ app.post("/api/session", async (request, response) => {
     }
 
     const account = await findAccountByIdentity(cleanNickname);
-    if (!account || !(await verifyPassword(password, account))) {
+    let passwordValid = false;
+    if (account && password.length <= MAX_PASSWORD_LENGTH) {
+      passwordValid = await verifyPassword(password, account);
+    } else {
+      await consumePasswordVerificationTime(password);
+    }
+    if (!account || !passwordValid) {
       await registerAuthFailure(
         identity.hash,
         account ? "account_password_failure" : "unknown_account",
@@ -267,9 +348,7 @@ app.post("/api/session", async (request, response) => {
       );
       response.status(401).json({
         ok: false,
-        error: account
-          ? "Mot de passe du compte incorrect."
-          : "Aucun compte n'existe avec ce pseudo.",
+        error: "Pseudo ou mot de passe incorrect.",
       });
       return;
     }
@@ -574,10 +653,11 @@ io.on("connection", (socket) => {
       callback?.({ ok: false, error: "Ce lien de recuperation est invalide." });
       return;
     }
-    if (newPassword.length < 8) {
+    const basicPasswordError = getNewPasswordError(newPassword);
+    if (basicPasswordError) {
       callback?.({
         ok: false,
-        error: "Le nouveau mot de passe doit faire au moins 8 caracteres.",
+        error: basicPasswordError,
       });
       return;
     }
@@ -593,6 +673,17 @@ io.on("connection", (socket) => {
           ok: false,
           error: "Ce lien est expire ou a deja ete utilise.",
         });
+        return;
+      }
+
+      const account = await getAccountByNickname(tokenRecord.accountNickname);
+      const passwordError = getNewPasswordError(newPassword, [
+        account?.nickname,
+        account?.displayName,
+        normalizeEmail(account?.email).split("@")[0],
+      ]);
+      if (passwordError) {
+        callback?.({ ok: false, error: passwordError });
         return;
       }
 
@@ -635,7 +726,7 @@ io.on("connection", (socket) => {
     let normalizedNickname = normalizeName(cleanNickname);
     const cleanRoom = rooms.has(room) ? room : "accueil";
     const wantsAdmin = Boolean(String(adminPassword || "").trim());
-    const isAdmin = String(adminPassword || "") === ADMIN_PASSWORD;
+    const isAdmin = secureSecretEqual(adminPassword, ADMIN_PASSWORD);
     const cleanAuthMode = ["guest", "login", "register", "session"].includes(authMode)
       ? authMode
       : "guest";
@@ -725,10 +816,14 @@ io.on("connection", (socket) => {
     }
 
     if (cleanAuthMode === "register") {
-      if (cleanAccountPassword.length < 8) {
+      const passwordError = getNewPasswordError(cleanAccountPassword, [
+        cleanNickname,
+        cleanAccountEmail.split("@")[0],
+      ]);
+      if (passwordError) {
         callback?.({
           ok: false,
-          error: "Le mot de passe du compte doit faire au moins 8 caracteres.",
+          error: passwordError,
         });
         return;
       }
@@ -791,24 +886,32 @@ io.on("connection", (socket) => {
         return;
       }
 
-      if (
-        cleanAuthMode === "login" &&
-        !(await verifyPassword(cleanAccountPassword, account))
-      ) {
-        await registerAuthFailure(
-          securityIdentity.hash,
-          "account_password_failure",
-          cleanNickname
-        );
-        callback?.({
-          ok: false,
-          error: "Mot de passe du compte incorrect.",
-        });
-        return;
+      if (cleanAuthMode === "login") {
+        let passwordValid = false;
+        if (cleanAccountPassword.length <= MAX_PASSWORD_LENGTH) {
+          passwordValid = await verifyPassword(cleanAccountPassword, account);
+        } else {
+          await consumePasswordVerificationTime(cleanAccountPassword);
+        }
+        if (!passwordValid) {
+          await registerAuthFailure(
+            securityIdentity.hash,
+            "account_password_failure",
+            cleanNickname
+          );
+          callback?.({
+            ok: false,
+            error: "Pseudo ou mot de passe incorrect.",
+          });
+          return;
+        }
       }
     }
 
     if (!account && (cleanAuthMode === "login" || cleanAuthMode === "session")) {
+      if (cleanAuthMode === "login") {
+        await consumePasswordVerificationTime(cleanAccountPassword);
+      }
       await registerAuthFailure(
         securityIdentity.hash,
         "unknown_account",
@@ -816,7 +919,7 @@ io.on("connection", (socket) => {
       );
       callback?.({
         ok: false,
-        error: "Aucun compte n'existe avec ce pseudo.",
+        error: "Pseudo ou mot de passe incorrect.",
       });
       return;
     }
@@ -1018,7 +1121,7 @@ io.on("connection", (socket) => {
     if (messageText.startsWith("/admin ")) {
       const password = messageText.slice(7).trim();
 
-      if (password !== ADMIN_PASSWORD) {
+      if (!secureSecretEqual(password, ADMIN_PASSWORD)) {
         socket.emit("message", {
           id: crypto.randomUUID(),
           type: "system",
@@ -1774,6 +1877,24 @@ async function sendTransactionalEmail({ account, subject, textContent }) {
   }
 }
 
+function isRequestOriginAllowed(source) {
+  const headers = source.headers || source.handshake?.headers || {};
+  const forwardedProtocol = String(headers["x-forwarded-proto"] || "")
+    .split(",")[0]
+    .trim();
+  const protocol =
+    forwardedProtocol ||
+    source.protocol ||
+    (source.secure || source.socket?.encrypted ? "https" : "http");
+  const forwardedHost = String(headers["x-forwarded-host"] || "")
+    .split(",")[0]
+    .trim();
+  const host = forwardedHost || String(headers.host || "").trim();
+  const allowedOrigins = [PUBLIC_URL];
+  if (host) allowedOrigins.push(`${protocol}://${host}`);
+  return isAllowedOrigin(headers.origin, allowedOrigins);
+}
+
 function normalizeName(value) {
   return String(value || "").trim().toLocaleLowerCase("fr-FR");
 }
@@ -1930,9 +2051,13 @@ function registerSuccessfulAccess(identityHash, authMode) {
   if (!PUBLIC_PROTECTION_ENABLED) return;
 
   const state = getProtectionState(identityHash);
-  state.failures = [];
-  state.lockedUntil = 0;
-  if (authMode === "register") state.registrations.push(Date.now());
+  if (authMode === "login") {
+    state.failures = [];
+    state.lockedUntil = 0;
+  }
+  if (authMode === "register") {
+    state.registrations.push(Date.now());
+  }
 }
 
 async function verifyTurnstileToken(rawToken, remoteIp) {
@@ -1994,10 +2119,36 @@ async function hashPassword(password) {
 }
 
 async function verifyPassword(password, account) {
+  if (
+    typeof password !== "string" ||
+    password.length > MAX_PASSWORD_LENGTH ||
+    !account?.salt ||
+    !account?.passwordHash
+  ) {
+    return false;
+  }
   const derivedKey = await scrypt(password, account.salt, 64);
   const storedHash = Buffer.from(account.passwordHash, "hex");
 
   return storedHash.length === derivedKey.length && timingSafeEqual(storedHash, derivedKey);
+}
+
+async function consumePasswordVerificationTime(password) {
+  await scrypt(
+    String(password || "").slice(0, MAX_PASSWORD_LENGTH),
+    "tchatelia-missing-account",
+    64
+  );
+}
+
+function secureSecretEqual(value, expectedValue) {
+  const providedHash = createHash("sha256")
+    .update(String(value || ""))
+    .digest();
+  const expectedHash = createHash("sha256")
+    .update(String(expectedValue || ""))
+    .digest();
+  return timingSafeEqual(providedHash, expectedHash);
 }
 
 function findUserByNickname(nickname) {
@@ -2298,11 +2449,13 @@ async function handleSettingsAction(socket, user, payload, callback) {
       callback?.({ ok: false, error: "Le mot de passe actuel est incorrect." });
       return;
     }
-    if (newPassword.length < 8) {
-      callback?.({
-        ok: false,
-        error: "Le nouveau mot de passe doit faire au moins 8 caracteres.",
-      });
+    const passwordError = getNewPasswordError(newPassword, [
+      account.nickname,
+      account.displayName,
+      normalizeEmail(account.email).split("@")[0],
+    ]);
+    if (passwordError) {
+      callback?.({ ok: false, error: passwordError });
       return;
     }
     if (currentPassword === newPassword) {
@@ -2877,8 +3030,13 @@ async function handleAccountAction(socket, admin, action, rawNickname, rawRole, 
 
   if (action === "password") {
     const password = String(rawPassword || "");
-    if (password.length < 8) {
-      emitPrivateSystem(socket, "Le nouveau mot de passe doit faire au moins 8 caracteres.");
+    const passwordError = getNewPasswordError(password, [
+      account.nickname,
+      account.displayName,
+      normalizeEmail(account.email).split("@")[0],
+    ]);
+    if (passwordError) {
+      emitPrivateSystem(socket, passwordError);
       return;
     }
 

@@ -203,6 +203,8 @@ let messageSearchIndex = -1;
 let favoritesOnly = false;
 let passwordResetEnabled = false;
 let emailVerificationEnabled = false;
+let minimumPasswordLength = 12;
+let maximumPasswordLength = 128;
 let activePasswordResetToken = "";
 let activeVerificationEmail = "";
 const currentRoomMessages = new Map();
@@ -1535,7 +1537,9 @@ function renderAccountPanel() {
     passwordButton.type = "button";
     passwordButton.textContent = "Nouveau mdp";
     passwordButton.addEventListener("click", () => {
-      const password = prompt(`Nouveau mot de passe pour ${account.displayName}`);
+      const password = prompt(
+        `Nouveau mot de passe pour ${account.displayName} (${minimumPasswordLength} caracteres minimum)`
+      );
       if (!password) return;
 
       socket.emit("account-action", {
@@ -2294,7 +2298,9 @@ function resizeAvatar(file) {
 function updateAuthModeRequirements() {
   const mode = document.querySelector('input[name="authMode"]:checked')?.value;
   accountPasswordInput.required = mode === "login" || mode === "register";
-  accountPasswordInput.minLength = mode === "register" ? 8 : 0;
+  accountPasswordInput.minLength =
+    mode === "register" ? minimumPasswordLength : 0;
+  accountPasswordInput.maxLength = maximumPasswordLength;
   accountEmailField.classList.toggle("hidden", mode !== "register");
   accountEmailInput.required = mode === "register";
   forgotPasswordButton.classList.toggle(
@@ -2303,7 +2309,7 @@ function updateAuthModeRequirements() {
   );
   accountPasswordInput.placeholder =
     mode === "register"
-      ? "8 caracteres minimum"
+      ? `${minimumPasswordLength} caracteres minimum`
       : mode === "login"
         ? "Mot de passe du compte"
         : "Optionnel";
@@ -2447,6 +2453,11 @@ async function initializePublicProtection() {
     const config = await response.json();
     passwordResetEnabled = Boolean(config.passwordResetEnabled);
     emailVerificationEnabled = Boolean(config.emailVerificationEnabled);
+    minimumPasswordLength =
+      Number(config.minPasswordLength) || minimumPasswordLength;
+    maximumPasswordLength =
+      Number(config.maxPasswordLength) || maximumPasswordLength;
+    applyPasswordRequirements();
     updateAuthModeRequirements();
     if (!config.turnstileEnabled || !config.turnstileSiteKey) return;
 
@@ -2469,6 +2480,25 @@ async function initializePublicProtection() {
   } catch {
     loginSecurity.classList.add("hidden");
   }
+}
+
+function applyPasswordRequirements() {
+  [
+    settingsNewPassword,
+    settingsConfirmPassword,
+    passwordResetNewPassword,
+    passwordResetConfirmPassword,
+  ].forEach((input) => {
+    input.minLength = minimumPasswordLength;
+    input.maxLength = maximumPasswordLength;
+  });
+  [
+    accountPasswordInput,
+    settingsCurrentPassword,
+    settingsDeletePassword,
+  ].forEach((input) => {
+    input.maxLength = maximumPasswordLength;
+  });
 }
 
 function openPasswordResetConfirmationFromUrl() {

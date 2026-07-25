@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Tchatelia</title>
     <link rel="icon" href="data:," />
-    <link rel="stylesheet" href="/styles.css?v=20260724-7" />
+    <link rel="stylesheet" href="/styles.css?v=20260725-2" />
   </head>
   <body>
     <main class="shell">
@@ -61,6 +61,7 @@
             id="accountPassword"
             name="accountPassword"
             type="password"
+            maxlength="128"
             autocomplete="current-password"
             placeholder="Connexion ou inscription"
           />
@@ -95,6 +96,7 @@
             id="adminPassword"
             name="adminPassword"
             type="password"
+            maxlength="256"
             autocomplete="current-password"
             placeholder="Optionnel"
           />
@@ -626,6 +628,7 @@
           <input
             id="settingsCurrentPassword"
             type="password"
+            maxlength="128"
             autocomplete="current-password"
             required
           />
@@ -633,7 +636,8 @@
           <input
             id="settingsNewPassword"
             type="password"
-            minlength="8"
+            minlength="12"
+            maxlength="128"
             autocomplete="new-password"
             required
           />
@@ -641,7 +645,8 @@
           <input
             id="settingsConfirmPassword"
             type="password"
-            minlength="8"
+            minlength="12"
+            maxlength="128"
             autocomplete="new-password"
             required
           />
@@ -680,6 +685,7 @@
           <input
             id="settingsDeletePassword"
             type="password"
+            maxlength="128"
             autocomplete="current-password"
             required
           />
@@ -724,7 +730,8 @@
         <input
           id="passwordResetNewPassword"
           type="password"
-          minlength="8"
+          minlength="12"
+          maxlength="128"
           autocomplete="new-password"
           required
         />
@@ -732,7 +739,8 @@
         <input
           id="passwordResetConfirmPassword"
           type="password"
-          minlength="8"
+          minlength="12"
+          maxlength="128"
           autocomplete="new-password"
           required
         />
@@ -832,6 +840,6 @@
     </dialog>
 
     <script src="/socket.io/socket.io.js"></script>
-    <script src="/app.js?v=20260724-7"></script>
+    <script src="/app.js?v=20260725-2"></script>
   </body>
 </html>
