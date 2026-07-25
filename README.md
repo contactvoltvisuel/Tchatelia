@@ -29,7 +29,8 @@ Prerequis : Node.js 24 ou plus recent.
 - Role moderateur : kick, ban et unban sans acces a la gestion complete.
 - Journal de moderation persistant : exclusions, bannissements, comptes et salons.
 - Profils utilisateurs : photo importee ou avatar par lien, description, role et date d'inscription.
-- Messages prives persistants entre comptes, compteur de non-lus et blocage.
+- Blocage global des comptes : messages publics, alertes, saisie et messages prives.
+- Messages prives persistants entre comptes et compteur de non-lus.
 - Signalement des profils et messages publics/prives avec file de moderation.
 - Reglement, conditions d'utilisation et politique de confidentialite.
 - Page de contact avec messages consultables dans le panneau admin.

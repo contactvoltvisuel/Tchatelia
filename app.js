@@ -79,6 +79,7 @@ const profileAvatarInput = document.querySelector("#profileAvatarInput");
 const profileRemoveAvatarButton = document.querySelector("#profileRemoveAvatarButton");
 const profileBioInput = document.querySelector("#profileBioInput");
 const profilePrivateButton = document.querySelector("#profilePrivateButton");
+const profileBlockButton = document.querySelector("#profileBlockButton");
 const profileReportButton = document.querySelector("#profileReportButton");
 const privateDialog = document.querySelector("#privateDialog");
 const privateCloseButton = document.querySelector("#privateCloseButton");
@@ -183,6 +184,7 @@ let currentContactMessages = [];
 let selectedAvatar = null;
 let currentProfileAccountNickname = "";
 let currentProfileNickname = "";
+let currentProfileBlockedByMe = false;
 let privateConversations = [];
 let activePrivateAccount = "";
 let activePrivateBlockedByMe = false;
@@ -688,6 +690,15 @@ profilePrivateButton.addEventListener("click", () => {
   openPrivateMessages(currentProfileAccountNickname);
 });
 
+profileBlockButton.addEventListener("click", () => {
+  if (!currentProfileAccountNickname) return;
+  changeBlockedUser(
+    currentProfileAccountNickname,
+    currentProfileNickname,
+    !currentProfileBlockedByMe
+  );
+});
+
 profileReportButton.addEventListener("click", () => {
   profileDialog.close();
   openReportDialog({
@@ -721,10 +732,14 @@ privateMessageForm.addEventListener("submit", (event) => {
 
 privateBlockButton.addEventListener("click", () => {
   if (!activePrivateAccount) return;
-  socket.emit("private-action", {
-    action: activePrivateBlockedByMe ? "unblock" : "block",
-    nickname: activePrivateAccount,
-  });
+  const conversation = privateConversations.find(
+    (item) => item.accountNickname === activePrivateAccount
+  );
+  changeBlockedUser(
+    activePrivateAccount,
+    conversation?.nickname || privateNickname.textContent,
+    !activePrivateBlockedByMe
+  );
 });
 
 reportCloseButton.addEventListener("click", () => {
@@ -1164,6 +1179,20 @@ socket.on("private-block-changed", ({ nickname }) => {
     socket.emit("private-action", {
       action: "open",
       nickname,
+    });
+  }
+});
+
+socket.on("user-block-changed", ({ accountNickname }) => {
+  if (
+    profileDialog.open &&
+    currentProfileAccountNickname === accountNickname
+  ) {
+    requestProfile(accountNickname);
+  }
+  if (settingsDialog.open) {
+    socket.emit("settings-action", { action: "get" }, (response) => {
+      if (response?.ok) renderAccountSettings(response.settings);
     });
   }
 });
@@ -1824,6 +1853,42 @@ function requestProfile(nickname) {
   });
 }
 
+function changeBlockedUser(accountNickname, displayName, shouldBlock) {
+  if (!currentAccount || !accountNickname) return;
+
+  const keepsModerationVisibility =
+    currentRole === "admin" || currentRole === "moderator";
+  const confirmation = shouldBlock
+    ? keepsModerationVisibility
+      ? `Bloquer ${displayName} ? Les messages prives seront bloques. Ses messages publics resteront visibles pour la moderation.`
+      : `Bloquer ${displayName} ? Ses messages publics seront masques et les messages prives seront bloques.`
+    : `Debloquer ${displayName} ?`;
+  if (!confirm(confirmation)) return;
+
+  socket.emit(
+    "block-action",
+    {
+      nickname: accountNickname,
+      blocked: shouldBlock,
+    },
+    (response) => {
+      if (!response?.ok) {
+        alert(response?.error || "Le blocage n'a pas pu etre modifie.");
+        return;
+      }
+
+      if (response.settings && settingsDialog.open) {
+        renderAccountSettings(response.settings);
+      }
+      alert(
+        shouldBlock
+          ? `${response.displayName} a ete bloque.`
+          : `${response.displayName} a ete debloque.`
+      );
+    }
+  );
+}
+
 function openAccountSettings() {
   if (!currentAccount) return;
   closeMobilePanels();
@@ -1924,6 +1989,7 @@ function setSettingsStatus(element, text, isError = false) {
 function renderProfile(profile) {
   currentProfileAccountNickname = profile.accountNickname || "";
   currentProfileNickname = profile.nickname;
+  currentProfileBlockedByMe = Boolean(profile.blockedByMe);
   profileNickname.textContent = profile.nickname;
   profileRole.textContent = profile.account ? formatRole(profile.role) : "invite";
   profileBio.textContent = profile.bio || "Aucune description.";
@@ -1941,8 +2007,15 @@ function renderProfile(profile) {
     !currentAccount ||
       !profile.account ||
       profile.isOwn ||
+      profile.blockedByMe ||
+      profile.blockedByThem ||
       profile.privateMessagesEnabled === false
   );
+  profileBlockButton.classList.toggle(
+    "hidden",
+    !currentAccount || !profile.account || profile.isOwn
+  );
+  profileBlockButton.textContent = profile.blockedByMe ? "Debloquer" : "Bloquer";
   profileReportButton.classList.toggle("hidden", !currentAccount || profile.isOwn);
   if (profile.isOwn) {
     selectedAvatar = profile.avatarUrl?.startsWith("data:image/") ? profile.avatarUrl : null;
@@ -2866,6 +2939,21 @@ function renderMessage(message) {
         message.pinnedAt ? "Desepingler" : "Epingler",
         () => togglePinnedMessage(message),
         message.pinnedAt ? "pinned" : ""
+      )
+    );
+  }
+
+  if (message.canBlock) {
+    actions.append(
+      createMessageActionButton(
+        message.blockedByMe ? "Debloquer" : "Bloquer",
+        () =>
+          changeBlockedUser(
+            message.authorAccountNickname,
+            message.nickname,
+            !message.blockedByMe
+          ),
+        message.blockedByMe ? "" : "danger"
       )
     );
   }

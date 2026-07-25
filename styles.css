@@ -1045,18 +1045,25 @@ button:hover {
 
 .profile-actions {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
   gap: 8px;
   margin-bottom: 18px;
 }
 
-.profile-actions:has(.profile-private-button.hidden) {
-  grid-template-columns: 1fr;
-}
-
 .profile-private-button,
+.profile-block-button,
 .profile-report-button {
   width: 100%;
+}
+
+.profile-block-button {
+  color: #a23818;
+  background: #fff5ef;
+}
+
+.profile-block-button:hover {
+  color: #fff;
+  background: #a23818;
 }
 
 .profile-report-button {
@@ -3034,6 +3041,13 @@ button.message-reaction:hover,
 .settings-blocked-list {
   display: grid;
   gap: 7px;
+}
+
+.settings-section-help {
+  margin: -3px 0 12px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.45;
 }
 
 .settings-blocked-user {

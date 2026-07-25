@@ -79,6 +79,11 @@ import {
   updateRoomTopic,
   updateReportStatus,
 } from "./db.js";
+import {
+  getMessageAuthorAccountNickname,
+  shouldHideAccountContentFromUser,
+  shouldHideMessageFromUser,
+} from "./blocking.js";
 
 const scrypt = promisify(scryptCallback);
 
@@ -843,10 +848,13 @@ io.on("connection", (socket) => {
     registerSuccessfulAccess(securityIdentity.hash, cleanAuthMode);
     const role = account?.role || (isAdmin ? "admin" : "user");
     const displayName = account?.displayName || cleanNickname;
-    const favoriteMessageIds =
+    const [favoriteMessageIds, blockedUsers] =
       account || cleanAuthMode === "register"
-        ? await listFavoriteMessageIds(accountNickname)
-        : [];
+        ? await Promise.all([
+            listFavoriteMessageIds(accountNickname),
+            listPrivateBlocks(accountNickname),
+          ])
+        : [[], []];
 
     if (
       (await isBanned(normalizedNickname)) ||
@@ -882,6 +890,9 @@ io.on("connection", (socket) => {
       lastReportAt: 0,
       lastReactionAt: 0,
       favoriteMessageIds: new Set(favoriteMessageIds),
+      blockedAccountNicknames: new Set(
+        blockedUsers.map((blockedUser) => blockedUser.blocked)
+      ),
       presenceStatus: "online",
       isTyping: false,
       typingTimeout: null,
@@ -1068,6 +1079,10 @@ io.on("connection", (socket) => {
         emitPrivateSystem(socket, "Le message auquel tu reponds n'est plus disponible.");
         return;
       }
+      if (shouldHideMessageFromUser(repliedMessage, user)) {
+        emitPrivateSystem(socket, "Debloque ce compte avant de repondre a son message.");
+        return;
+      }
       reply = {
         replyToId: repliedMessage.id,
         replyToNickname: repliedMessage.nickname,
@@ -1115,6 +1130,10 @@ io.on("connection", (socket) => {
       targetMessage.deletedAt
     ) {
       callback?.({ ok: false, error: "Ce message n'est plus disponible." });
+      return;
+    }
+    if (shouldHideMessageFromUser(targetMessage, user)) {
+      callback?.({ ok: false, error: "Ce message appartient a un compte bloque." });
       return;
     }
 
@@ -1439,6 +1458,44 @@ io.on("connection", (socket) => {
       callback?.({
         ok: false,
         error: "Les parametres n'ont pas pu etre mis a jour. Reessaie plus tard.",
+      });
+    }
+  });
+
+  socket.on("block-action", async (payload = {}, callback) => {
+    const user = users.get(socket.id);
+    if (!user?.accountNickname) {
+      callback?.({
+        ok: false,
+        error: "Le blocage est reserve aux comptes inscrits.",
+      });
+      return;
+    }
+
+    try {
+      const targetAccount = await changeUserBlockState(
+        user.accountNickname,
+        payload.nickname,
+        payload.blocked !== false
+      );
+      callback?.({
+        ok: true,
+        blocked: payload.blocked !== false,
+        accountNickname: targetAccount.nickname,
+        displayName: targetAccount.displayName,
+        settings: await buildAccountSettings(user.accountNickname),
+      });
+    } catch (error) {
+      console.error("Erreur blocage utilisateur:", error);
+      const publicError = [
+        "Choisis un autre compte.",
+        "Ce compte n'existe pas.",
+      ].includes(error.message)
+        ? error.message
+        : "Le blocage n'a pas pu etre modifie.";
+      callback?.({
+        ok: false,
+        error: publicError,
       });
     }
   });
@@ -1998,6 +2055,10 @@ async function sendProfile(socket, viewer, rawNickname) {
       ? await getAccountByNickname(connectedTarget[1].accountNickname)
       : null);
   if (account) {
+    const blockState =
+      viewer.accountNickname && viewer.accountNickname !== account.nickname
+        ? await getPrivateBlockState(viewer.accountNickname, account.nickname)
+        : { blockedByMe: false, blockedByThem: false };
     socket.emit("profile", {
       accountNickname: account.nickname,
       nickname: account.displayName,
@@ -2008,6 +2069,8 @@ async function sendProfile(socket, viewer, rawNickname) {
       account: true,
       isOwn: viewer.accountNickname === account.nickname,
       privateMessagesEnabled: Boolean(account.privateMessagesEnabled),
+      blockedByMe: blockState.blockedByMe,
+      blockedByThem: blockState.blockedByThem,
     });
     return;
   }
@@ -2028,6 +2091,8 @@ async function sendProfile(socket, viewer, rawNickname) {
     account: false,
     isOwn: false,
     privateMessagesEnabled: false,
+    blockedByMe: false,
+    blockedByThem: false,
   });
 }
 
@@ -2050,6 +2115,68 @@ async function buildAccountSettings(accountNickname) {
       createdAt: blockedUser.createdAt,
     })),
   };
+}
+
+async function changeUserBlockState(
+  blockerAccountNickname,
+  rawTargetNickname,
+  shouldBlock
+) {
+  const targetNickname = normalizeName(rawTargetNickname);
+  if (!targetNickname || targetNickname === blockerAccountNickname) {
+    throw new Error("Choisis un autre compte.");
+  }
+
+  const targetAccount = await getAccountByNickname(targetNickname);
+  if (!targetAccount) {
+    throw new Error("Ce compte n'existe pas.");
+  }
+
+  await setPrivateBlock(
+    blockerAccountNickname,
+    targetAccount.nickname,
+    shouldBlock
+  );
+
+  const affectedRooms = new Set();
+  for (const [socketId, connectedUser] of users.entries()) {
+    if (connectedUser.accountNickname !== blockerAccountNickname) continue;
+
+    if (!(connectedUser.blockedAccountNicknames instanceof Set)) {
+      connectedUser.blockedAccountNicknames = new Set();
+    }
+    if (shouldBlock) {
+      connectedUser.blockedAccountNicknames.add(targetAccount.nickname);
+    } else {
+      connectedUser.blockedAccountNicknames.delete(targetAccount.nickname);
+    }
+
+    affectedRooms.add(connectedUser.room);
+    const connectedSocket = io.sockets.sockets.get(socketId);
+    if (connectedSocket) {
+      sendRoomHistory(connectedSocket, connectedUser, connectedUser.room);
+    }
+  }
+
+  emitToAccount(blockerAccountNickname, "user-block-changed", {
+    accountNickname: targetAccount.nickname,
+    displayName: targetAccount.displayName,
+    blocked: shouldBlock,
+  });
+  emitToAccount(blockerAccountNickname, "private-block-changed", {
+    nickname: targetAccount.nickname,
+  });
+  emitToAccount(targetAccount.nickname, "private-block-changed", {
+    nickname: blockerAccountNickname,
+  });
+
+  for (const room of affectedRooms) publishTyping(room);
+  await Promise.all([
+    refreshPrivateStateForAccount(blockerAccountNickname),
+    refreshPrivateStateForAccount(targetAccount.nickname),
+  ]);
+
+  return targetAccount;
 }
 
 async function handleSettingsAction(socket, user, payload, callback) {
@@ -2217,11 +2344,7 @@ async function handleSettingsAction(socket, user, payload, callback) {
       callback?.({ ok: false, error: "Compte bloque introuvable." });
       return;
     }
-    await setPrivateBlock(account.nickname, blockedNickname, false);
-    emitToAccount(blockedNickname, "private-block-changed", {
-      nickname: account.nickname,
-    });
-    await refreshPrivateStateForAccount(account.nickname);
+    await changeUserBlockState(account.nickname, blockedNickname, false);
     callback?.({ ok: true, settings: await buildAccountSettings(account.nickname) });
     return;
   }
@@ -2278,11 +2401,12 @@ async function handlePrivateAction(socket, user, payload) {
   }
 
   if (action === "block" || action === "unblock") {
-    await setPrivateBlock(user.accountNickname, targetNickname, action === "block");
+    await changeUserBlockState(
+      user.accountNickname,
+      targetNickname,
+      action === "block"
+    );
     await sendPrivateConversation(socket, user.accountNickname, targetAccount);
-    emitToAccount(targetNickname, "private-block-changed", {
-      nickname: user.accountNickname,
-    });
     return;
   }
 
@@ -3086,25 +3210,52 @@ function limitRoomHistory(history, limit) {
 function sendRoomHistory(socket, user, room) {
   socket?.emit(
     "history",
-    rooms.get(room).history.map((message) => serializeMessageForUser(message, user))
+    rooms
+      .get(room)
+      .history.map((message) => serializeMessageForUser(message, user, room))
+      .filter(Boolean)
   );
 }
 
 function emitMessageToRoom(eventName, room, message) {
   for (const [socketId, user] of users.entries()) {
     if (user.room !== room) continue;
-    io.to(socketId).emit(eventName, serializeMessageForUser(message, user));
+    const serializedMessage = serializeMessageForUser(message, user, room);
+    if (serializedMessage) {
+      io.to(socketId).emit(eventName, serializedMessage);
+    }
   }
 }
 
-function serializeMessageForUser(message, user) {
+function serializeMessageForUser(message, user, room) {
+  if (shouldHideMessageFromUser(message, user)) return null;
+
   const deletedAt = Number(message.deletedAt) || null;
+  const authorAccountNickname = getMessageAuthorAccountNickname(message);
+  const blockedByMe = Boolean(
+    authorAccountNickname &&
+      user?.blockedAccountNicknames?.has(authorAccountNickname)
+  );
   const isOwner =
     Boolean(message.authorId) &&
     Boolean(user?.messageAuthorId) &&
     message.authorId === user.messageAuthorId;
   const canModerate = Boolean(user && MODERATION_ROLES.has(user.role));
   const canManage = message.type !== "system" && !deletedAt;
+  const canBlock = Boolean(
+    canManage &&
+      user?.accountNickname &&
+      authorAccountNickname &&
+      user.accountNickname !== authorAccountNickname
+  );
+  const repliedMessage = message.replyToId
+    ? rooms.get(room)?.history.find(
+        (candidate) => candidate.id === message.replyToId
+      )
+    : null;
+  const hideReply = Boolean(
+    repliedMessage && shouldHideMessageFromUser(repliedMessage, user)
+  );
   const reactionData = deletedAt ? {} : parseReactionData(message.reactionData);
   const reactions = [...MESSAGE_REACTIONS.entries()]
     .map(([key, emoji]) => {
@@ -3125,10 +3276,12 @@ function serializeMessageForUser(message, user) {
     type: message.type,
     nickname: message.nickname,
     text: deletedAt ? "" : message.text,
-    replyToId: message.replyToId || "",
-    replyToNickname: message.replyToNickname || "",
-    replyToText: message.replyToDeleted ? "" : message.replyToText || "",
-    replyToDeleted: Boolean(message.replyToDeleted),
+    authorAccountNickname,
+    replyToId: hideReply ? "" : message.replyToId || "",
+    replyToNickname: hideReply ? "" : message.replyToNickname || "",
+    replyToText:
+      hideReply || message.replyToDeleted ? "" : message.replyToText || "",
+    replyToDeleted: hideReply || Boolean(message.replyToDeleted),
     editedAt: Number(message.editedAt) || null,
     deletedAt,
     deletedBy: message.deletedBy || "",
@@ -3139,6 +3292,8 @@ function serializeMessageForUser(message, user) {
     canDelete: canManage && (isOwner || canModerate),
     canReact: canManage && Boolean(user?.accountNickname),
     canFavorite: canManage && Boolean(user?.accountNickname),
+    canBlock,
+    blockedByMe,
     isFavorite: canManage && Boolean(user?.favoriteMessageIds?.has(message.id)),
     canPin: canManage && canModerate,
     reactions,
@@ -3223,10 +3378,23 @@ function clearUserTyping(user, shouldPublish = true) {
 }
 
 function publishTyping(room) {
-  const nicknames = [...users.values()]
-    .filter((user) => user.room === room && user.isTyping)
-    .map((user) => user.nickname);
-  io.to(room).emit("typing-users", { room, nicknames });
+  const typingUsers = [...users.values()].filter(
+    (user) => user.room === room && user.isTyping
+  );
+
+  for (const [socketId, viewer] of users.entries()) {
+    if (viewer.room !== room) continue;
+    const nicknames = typingUsers
+      .filter(
+        (typingUser) =>
+          !shouldHideAccountContentFromUser(
+            typingUser.accountNickname,
+            viewer
+          )
+      )
+      .map((typingUser) => typingUser.nickname);
+    io.to(socketId).emit("typing-users", { room, nicknames });
+  }
 }
 
 function publishRoomActivity(room, message, senderSocketId) {
@@ -3238,6 +3406,7 @@ function publishRoomActivity(room, message, senderSocketId) {
 
   for (const [socketId, connectedUser] of users.entries()) {
     if (socketId === senderSocketId) continue;
+    if (shouldHideMessageFromUser(message, connectedUser)) continue;
 
     const normalizedNickname = normalizeName(connectedUser.nickname);
     const mentioned =
