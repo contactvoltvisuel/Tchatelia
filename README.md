@@ -37,10 +37,11 @@ Prerequis : Node.js 24 ou plus recent.
 - Reglement, conditions d'utilisation et politique de confidentialite.
 - Page de contact avec messages consultables dans le panneau admin.
 - Validation de l'age minimum et des regles avant l'entree dans le chat.
-- Commandes de moderation : `/kick pseudo`, `/ban pseudo`, `/unban pseudo`.
+- Commandes de moderation : `/kick pseudo`, `/ban pseudo`, `/unban pseudo`, `/unmute pseudo`.
 - Panneau admin : kick, ban, unban, creation et suppression de salons.
 - Historique et bannissements sauvegardes en SQLite local ou PostgreSQL/Supabase.
-- Anti-spam simple : limite les rafales et les messages identiques repetes.
+- Moderation automatique : avertissement, mutes temporaires progressifs et termes configurables.
+- Alertes de moderation par e-mail lorsqu'aucun admin ou moderateur n'est connecte.
 - Protection publique : limites de connexion et d'inscription, verrouillage apres plusieurs echecs
   et journal de securite reserve aux administrateurs.
 - En-tetes de securite du navigateur, controle des origines et taille limitee des requetes.
@@ -164,12 +165,32 @@ PUBLIC_URL=https://tchatelia.onrender.com
 BREVO_API_KEY=xkeysib-...
 MAIL_FROM_EMAIL=adresse-verifiee@example.com
 MAIL_FROM_NAME=Tchatelia
+MODERATION_ALERT_EMAIL=adresse-admin@example.com
 ```
 
 `BREVO_API_KEY` doit rester secrete et ne doit jamais etre ajoutee dans GitHub. Une adresse e-mail
 est obligatoire pour les nouvelles inscriptions. Le compte devient utilisable apres le clic sur le
 lien de verification valable 24 heures. Les comptes deja crees avant cette fonctionnalite restent
 valides. Un changement d'adresse depuis `Parametres` demande une nouvelle verification.
+
+## Moderation automatique
+
+La moderation automatique est activee par defaut. Le premier abus de spam declenche un
+avertissement. Une recidive dans les 30 minutes applique un mute de 2 minutes, puis les durees
+progressent jusqu'a une heure. Les mutes sont conserves dans la base de donnees et peuvent etre
+retires avec le bouton `Demuter` ou la commande `/unmute pseudo`.
+
+Les termes interdits sont facultatifs et se configurent dans Render, separes par des virgules :
+
+```text
+AUTO_MODERATION=true
+AUTO_MODERATION_TERMS=terme1,expression interdite
+MODERATION_ALERT_EMAIL=adresse-admin@example.com
+```
+
+Lorsqu'aucun membre de la moderation n'est connecte, un mute automatique ou un nouveau
+signalement envoie une alerte Brevo. Sans `MODERATION_ALERT_EMAIL`, l'alerte est envoyee a
+`MAIL_FROM_EMAIL`.
 
 Il est aussi possible de le changer au lancement :
 
@@ -196,7 +217,8 @@ Pour une premiere mise en ligne gratuite :
 7. Utiliser `npm start` comme commande de demarrage.
 8. Ajouter dans Render les variables `ADMIN_PASSWORD`, `ADMIN_ALLOWED_IPS`, `DATABASE_URL`,
    `DATABASE_SSL=true`, `PUBLIC_PROTECTION=true`, `SECURITY_HASH_SECRET`, `PUBLIC_URL`,
-   `BREVO_API_KEY`, `MAIL_FROM_EMAIL` et `MAIL_FROM_NAME`.
+   `BREVO_API_KEY`, `MAIL_FROM_EMAIL`, `MAIL_FROM_NAME`, `AUTO_MODERATION=true`,
+   `AUTO_MODERATION_TERMS` et `MODERATION_ALERT_EMAIL`.
 
 Important : utiliser `npm install`, pas `npm ci`, car Render doit installer la
 dependance PostgreSQL `pg` a partir de `package.json`.

@@ -7,6 +7,7 @@ const database = process.env.DATABASE_URL
 export const {
   banNickname,
   clearAccountEmailTokens,
+  clearTemporaryMute,
   createContactMessage,
   createAccountSession,
   createEmailVerificationToken,
@@ -21,6 +22,7 @@ export const {
   getAccountByNickname,
   getAccountByEmail,
   getAccountSession,
+  getActiveTemporaryMute,
   getContactMessageById,
   getDatabaseLabel,
   getPrivateBlockState,
@@ -51,6 +53,7 @@ export const {
   saveMessage,
   saveModerationLog,
   saveSecurityEvent,
+  saveTemporaryMute,
   setPrivateBlock,
   setMessageFavorite,
   setPinnedMessage,

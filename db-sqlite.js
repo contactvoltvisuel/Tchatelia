@@ -56,6 +56,18 @@ export async function initDatabase() {
       created_at INTEGER NOT NULL
     );
 
+    CREATE TABLE IF NOT EXISTS temporary_mutes (
+      subject_key TEXT PRIMARY KEY,
+      display_name TEXT NOT NULL,
+      reason TEXT NOT NULL,
+      muted_by TEXT NOT NULL,
+      expires_at INTEGER NOT NULL,
+      created_at INTEGER NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS temporary_mutes_expires_idx
+      ON temporary_mutes (expires_at);
+
     CREATE TABLE IF NOT EXISTS accounts (
       nickname TEXT PRIMARY KEY,
       display_name TEXT NOT NULL,
@@ -929,6 +941,7 @@ export async function deleteAccount(nickname) {
     db.prepare("DELETE FROM password_reset_tokens WHERE account_nickname = ?").run(nickname);
     db.prepare("DELETE FROM email_verification_tokens WHERE account_nickname = ?").run(nickname);
     db.prepare("DELETE FROM account_sessions WHERE account_nickname = ?").run(nickname);
+    db.prepare("DELETE FROM temporary_mutes WHERE subject_key = ?").run(`account:${nickname}`);
     db.prepare("DELETE FROM message_favorites WHERE account_nickname = ?").run(nickname);
     db.prepare("DELETE FROM private_blocks WHERE blocker = ? OR blocked = ?").run(
       nickname,
@@ -1147,6 +1160,39 @@ export async function trimRoomHistory(room, limit = 250) {
 
 export async function isBanned(nickname) {
   return Boolean(db.prepare("SELECT 1 FROM bans WHERE nickname = ?").get(nickname));
+}
+
+export async function getActiveTemporaryMute(subjectKey) {
+  const now = Date.now();
+  db.prepare("DELETE FROM temporary_mutes WHERE expires_at <= ?").run(now);
+  return db
+    .prepare(`
+      SELECT subject_key AS subjectKey, display_name AS displayName, reason,
+        muted_by AS mutedBy, expires_at AS expiresAt, created_at AS createdAt
+      FROM temporary_mutes
+      WHERE subject_key = ? AND expires_at > ?
+    `)
+    .get(subjectKey, now);
+}
+
+export async function saveTemporaryMute(mute) {
+  db.prepare(`
+    INSERT OR REPLACE INTO temporary_mutes (
+      subject_key, display_name, reason, muted_by, expires_at, created_at
+    )
+    VALUES (?, ?, ?, ?, ?, ?)
+  `).run(
+    mute.subjectKey,
+    mute.displayName,
+    mute.reason,
+    mute.mutedBy,
+    mute.expiresAt,
+    mute.createdAt
+  );
+}
+
+export async function clearTemporaryMute(subjectKey) {
+  db.prepare("DELETE FROM temporary_mutes WHERE subject_key = ?").run(subjectKey);
 }
 
 export async function banNickname(nickname, displayName, bannedBy) {

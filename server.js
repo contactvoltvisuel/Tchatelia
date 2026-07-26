@@ -17,6 +17,7 @@ import { Server } from "socket.io";
 import {
   banNickname,
   clearAccountEmailTokens,
+  clearTemporaryMute,
   createContactMessage,
   createAccount,
   createAccountSession,
@@ -32,6 +33,7 @@ import {
   getAccountByNickname,
   getAccountByEmail,
   getAccountSession,
+  getActiveTemporaryMute,
   getContactMessageById,
   getDatabaseLabel,
   getMessageById,
@@ -61,6 +63,7 @@ import {
   saveMessage,
   saveModerationLog,
   saveSecurityEvent,
+  saveTemporaryMute,
   setAccountActive,
   setAccountEmailVerified,
   setPrivateBlock,
@@ -93,6 +96,12 @@ import {
   MIN_PASSWORD_LENGTH,
   parseAllowedIpAddresses,
 } from "./security.js";
+import {
+  findBlockedTerm,
+  formatModerationDuration,
+  getAutomaticMuteDuration,
+  parseModerationTerms,
+} from "./auto-moderation.js";
 
 const scrypt = promisify(scryptCallback);
 
@@ -134,11 +143,26 @@ const TURNSTILE_ENABLED = Boolean(TURNSTILE_SITE_KEY && TURNSTILE_SECRET_KEY);
 const BREVO_API_KEY = String(process.env.BREVO_API_KEY || "").trim();
 const MAIL_FROM_EMAIL = normalizeEmail(process.env.MAIL_FROM_EMAIL);
 const MAIL_FROM_NAME = String(process.env.MAIL_FROM_NAME || "Tchatelia").trim().slice(0, 70);
+const MODERATION_ALERT_EMAIL =
+  normalizeEmail(process.env.MODERATION_ALERT_EMAIL) || MAIL_FROM_EMAIL;
 const PUBLIC_URL = String(process.env.PUBLIC_URL || "").trim().replace(/\/+$/, "");
 const PASSWORD_RESET_ENABLED = Boolean(
   BREVO_API_KEY && isValidEmail(MAIL_FROM_EMAIL)
 );
 const EMAIL_VERIFICATION_ENABLED = PASSWORD_RESET_ENABLED;
+const AUTOMATIC_MODERATION_ENABLED = process.env.AUTO_MODERATION !== "false";
+const AUTOMATIC_MODERATION_TERMS = parseModerationTerms(
+  process.env.AUTO_MODERATION_TERMS
+);
+const MODERATION_ALERT_EMAIL_ENABLED = Boolean(
+  BREVO_API_KEY &&
+    isValidEmail(MAIL_FROM_EMAIL) &&
+    isValidEmail(MODERATION_ALERT_EMAIL)
+);
+const AUTOMATIC_VIOLATION_WINDOW_MS = 30 * 60_000;
+const MODERATION_ALERT_COOLDOWN_MS = 10 * 60_000;
+const MODERATION_ALERT_WINDOW_MS = 60 * 60_000;
+const MAX_MODERATION_ALERTS_PER_WINDOW = 6;
 const PASSWORD_RESET_TTL_MS = 30 * 60_000;
 const EMAIL_VERIFICATION_TTL_MS = 24 * 60 * 60_000;
 const ACCOUNT_SESSION_TTL_MS = 30 * 24 * 60 * 60_000;
@@ -161,6 +185,9 @@ const contactRateLimits = new Map();
 const protectionStates = new Map();
 const passwordResetRateLimits = new Map();
 const emailVerificationRateLimits = new Map();
+const automaticModerationStates = new Map();
+const moderationAlertRateLimits = new Map();
+let moderationAlertHistory = [];
 
 await initDatabase();
 
@@ -1029,6 +1056,13 @@ io.on("connection", (socket) => {
             listPrivateBlocks(accountNickname),
           ])
         : [[], []];
+    const moderationSubjectKey =
+      account || cleanAuthMode === "register"
+        ? `account:${accountNickname}`
+        : `guest:${securityIdentity.hash}:${normalizedNickname}`;
+    const activeMute = MODERATION_ROLES.has(role)
+      ? null
+      : await getActiveTemporaryMute(moderationSubjectKey);
 
     if (
       (await isBanned(normalizedNickname)) ||
@@ -1058,11 +1092,14 @@ io.on("connection", (socket) => {
           ? `account:${accountNickname}`
           : `guest:${randomUUID()}`,
       securityIdentityHash: securityIdentity.hash,
+      moderationSubjectKey,
       adminIpAllowed,
       memberSince: account?.createdAt || Date.now(),
       messageTimes: [],
       lastMessage: "",
       cooldownUntil: 0,
+      mutedUntil: Number(activeMute?.expiresAt) || 0,
+      muteReason: activeMute?.reason || "",
       lastReportAt: 0,
       lastReactionAt: 0,
       favoriteMessageIds: new Set(favoriteMessageIds),
@@ -1102,7 +1139,14 @@ io.on("connection", (socket) => {
       account: Boolean(account || cleanAuthMode === "register"),
       accountNickname: account || cleanAuthMode === "register" ? accountNickname : "",
       topic: rooms.get(cleanRoom).topic,
+      mutedUntil: Number(activeMute?.expiresAt) || 0,
     });
+    if (activeMute) {
+      emitPrivateSystem(
+        socket,
+        buildActiveMuteMessage(activeMute.expiresAt, activeMute.reason)
+      );
+    }
     publishTyping(cleanRoom);
   });
 
@@ -1136,6 +1180,10 @@ io.on("connection", (socket) => {
   socket.on("typing", (payload = {}) => {
     const user = users.get(socket.id);
     if (!user) return;
+    if (!MODERATION_ROLES.has(user.role) && user.mutedUntil > Date.now()) {
+      clearUserTyping(user);
+      return;
+    }
 
     const active =
       typeof payload === "boolean" ? payload : Boolean(payload.active);
@@ -1183,9 +1231,9 @@ io.on("connection", (socket) => {
         nickname: "Systeme",
         text:
           user.role === "admin"
-            ? "Commandes admin : /me texte, /clear, /kick pseudo, /ban pseudo, /unban pseudo"
+            ? "Commandes admin : /me texte, /clear, /kick pseudo, /ban pseudo, /unban pseudo, /unmute pseudo"
             : user.role === "moderator"
-              ? "Commandes moderation : /me texte, /clear, /kick pseudo, /ban pseudo, /unban pseudo"
+              ? "Commandes moderation : /me texte, /clear, /kick pseudo, /ban pseudo, /unban pseudo, /unmute pseudo"
             : user.adminIpAllowed
               ? "Commandes : /me texte, /clear, /admin motdepasse"
               : "Commandes : /me texte, /clear",
@@ -1242,15 +1290,35 @@ io.on("connection", (socket) => {
       return;
     }
 
+    if (messageText.startsWith("/unmute ")) {
+      await handleModeration(socket, user, "unmute", messageText.slice(8));
+      return;
+    }
+
+    if (!(await ensureUserCanSpeak(socket, user))) return;
+
+    const blockedTerm = findBlockedTerm(messageText, AUTOMATIC_MODERATION_TERMS);
+    if (AUTOMATIC_MODERATION_ENABLED && blockedTerm) {
+      await handleAutomaticViolation(socket, user, {
+        reason: "Contenu interdit detecte",
+        fallbackMessage: "Ce message contient un terme interdit.",
+        severe: true,
+        excerpt: messageText,
+      });
+      return;
+    }
+
     const spamCheck = checkSpam(user, messageText);
     if (!spamCheck.ok) {
-      socket.emit("message", {
-        id: crypto.randomUUID(),
-        type: "system",
-        nickname: "Systeme",
-        text: spamCheck.message,
-        createdAt: Date.now(),
-      });
+      if (spamCheck.violation) {
+        await handleAutomaticViolation(socket, user, {
+          reason: spamCheck.reason,
+          fallbackMessage: spamCheck.message,
+          excerpt: messageText,
+        });
+      } else {
+        emitPrivateSystem(socket, spamCheck.message);
+      }
       return;
     }
 
@@ -1553,7 +1621,7 @@ io.on("connection", (socket) => {
     const user = users.get(socket.id);
     if (!user) return;
 
-    const allowedActions = new Set(["kick", "ban", "unban"]);
+    const allowedActions = new Set(["kick", "ban", "unban", "unmute"]);
     if (!allowedActions.has(action)) return;
 
     await handleModeration(socket, user, action, nickname);
@@ -1940,7 +2008,57 @@ async function sendEmailVerification(account, verificationUrl) {
   });
 }
 
-async function sendTransactionalEmail({ account, subject, textContent }) {
+function hasConnectedModerator() {
+  return [...users.values()].some((user) => MODERATION_ROLES.has(user.role));
+}
+
+function queueModerationAlert({ key, subject, textContent }) {
+  if (!MODERATION_ALERT_EMAIL_ENABLED || hasConnectedModerator()) return;
+
+  const now = Date.now();
+  moderationAlertHistory = moderationAlertHistory.filter(
+    (sentAt) => now - sentAt < MODERATION_ALERT_WINDOW_MS
+  );
+  if (moderationAlertHistory.length >= MAX_MODERATION_ALERTS_PER_WINDOW) return;
+
+  const alertKey = String(key || "moderation").slice(0, 120);
+  const previousAlertAt = moderationAlertRateLimits.get(alertKey) || 0;
+  if (now - previousAlertAt < MODERATION_ALERT_COOLDOWN_MS) return;
+
+  moderationAlertRateLimits.set(alertKey, now);
+  moderationAlertHistory.push(now);
+  if (moderationAlertRateLimits.size > 1000) {
+    for (const [storedKey, sentAt] of moderationAlertRateLimits.entries()) {
+      if (now - sentAt >= MODERATION_ALERT_COOLDOWN_MS) {
+        moderationAlertRateLimits.delete(storedKey);
+      }
+    }
+  }
+
+  void sendTransactionalEmail({
+    recipientEmail: MODERATION_ALERT_EMAIL,
+    recipientName: "Administration Tchatelia",
+    subject,
+    textContent,
+  }).catch((error) => {
+    moderationAlertRateLimits.delete(alertKey);
+    console.error("Erreur alerte de moderation:", error.message);
+  });
+}
+
+async function sendTransactionalEmail({
+  account,
+  recipientEmail,
+  recipientName,
+  subject,
+  textContent,
+}) {
+  const destinationEmail = normalizeEmail(recipientEmail || account?.email);
+  const destinationName = String(
+    recipientName || account?.displayName || "Utilisateur Tchatelia"
+  )
+    .trim()
+    .slice(0, 70);
   const response = await fetch("https://api.brevo.com/v3/smtp/email", {
     method: "POST",
     headers: {
@@ -1955,8 +2073,8 @@ async function sendTransactionalEmail({ account, subject, textContent }) {
       },
       to: [
         {
-          email: account.email,
-          name: account.displayName,
+          email: destinationEmail,
+          name: destinationName,
         },
       ],
       subject,
@@ -2687,9 +2805,32 @@ async function handlePrivateAction(socket, user, payload) {
     return;
   }
 
+  if (!(await ensureUserCanSpeak(socket, user, true))) return;
+
+  const blockedTerm = findBlockedTerm(text, AUTOMATIC_MODERATION_TERMS);
+  if (AUTOMATIC_MODERATION_ENABLED && blockedTerm) {
+    await handleAutomaticViolation(socket, user, {
+      reason: "Contenu interdit detecte",
+      fallbackMessage: "Ce message contient un terme interdit.",
+      severe: true,
+      excerpt: text,
+      privateContext: true,
+    });
+    return;
+  }
+
   const spamCheck = checkSpam(user, text);
   if (!spamCheck.ok) {
-    emitPrivateError(socket, spamCheck.message);
+    if (spamCheck.violation) {
+      await handleAutomaticViolation(socket, user, {
+        reason: spamCheck.reason,
+        fallbackMessage: spamCheck.message,
+        excerpt: text,
+        privateContext: true,
+      });
+    } else {
+      emitPrivateError(socket, spamCheck.message);
+    }
     return;
   }
 
@@ -2971,6 +3112,19 @@ async function handleCreateReport(socket, user, payload) {
   user.lastReportAt = now;
   socket.emit("report-created");
   await publishReports();
+  queueModerationAlert({
+    key: `report:${target}`,
+    subject: `Nouveau signalement : ${targetDisplay}`,
+    textContent:
+      `Un signalement attend dans le centre de moderation Tchatelia.\n\n` +
+      `Signale par : ${user.nickname}\n` +
+      `Personne concernee : ${targetDisplay}\n` +
+      `Motif : ${reason}\n` +
+      `Emplacement : ${room}\n` +
+      `Details : ${details || "Aucun detail"}\n` +
+      `Extrait : ${contentSnapshot.slice(0, 240)}\n\n` +
+      `Ouvre le centre de moderation : ${PUBLIC_URL || "Tchatelia"}`,
+  });
 }
 
 async function handleReportModeration(socket, moderator, payload) {
@@ -3330,6 +3484,141 @@ function emitPrivateSystem(socket, text) {
   });
 }
 
+function emitModerationFeedback(socket, text, privateContext = false) {
+  if (privateContext) {
+    emitPrivateError(socket, text);
+  } else {
+    emitPrivateSystem(socket, text);
+  }
+}
+
+function buildActiveMuteMessage(expiresAt, reason) {
+  const remaining = Math.max(1, Number(expiresAt) - Date.now());
+  return (
+    `Tu es temporairement muet encore ${formatModerationDuration(remaining)}.` +
+    ` Motif : ${reason || "moderation automatique"}.`
+  );
+}
+
+async function ensureUserCanSpeak(socket, user, privateContext = false) {
+  if (MODERATION_ROLES.has(user.role)) return true;
+
+  const now = Date.now();
+  if (!user.mutedUntil || user.mutedUntil <= now) {
+    if (user.mutedUntil) {
+      await clearTemporaryMute(user.moderationSubjectKey);
+      user.mutedUntil = 0;
+      user.muteReason = "";
+      user.cooldownUntil = 0;
+      publishUsers(user.room);
+    }
+    return true;
+  }
+
+  emitModerationFeedback(
+    socket,
+    buildActiveMuteMessage(user.mutedUntil, user.muteReason),
+    privateContext
+  );
+  return false;
+}
+
+function getAutomaticModerationState(subjectKey) {
+  const now = Date.now();
+  let state = automaticModerationStates.get(subjectKey);
+  if (!state) {
+    state = { violationTimes: [] };
+    automaticModerationStates.set(subjectKey, state);
+  }
+  state.violationTimes = state.violationTimes.filter(
+    (violationAt) => now - violationAt < AUTOMATIC_VIOLATION_WINDOW_MS
+  );
+  return state;
+}
+
+async function handleAutomaticViolation(
+  socket,
+  user,
+  {
+    reason,
+    fallbackMessage,
+    severe = false,
+    excerpt = "",
+    privateContext = false,
+  }
+) {
+  if (!AUTOMATIC_MODERATION_ENABLED || MODERATION_ROLES.has(user.role)) {
+    emitModerationFeedback(socket, fallbackMessage, privateContext);
+    return;
+  }
+
+  const state = getAutomaticModerationState(user.moderationSubjectKey);
+  state.violationTimes.push(Date.now());
+  const violationCount = state.violationTimes.length;
+
+  if (!severe && violationCount < 2) {
+    emitModerationFeedback(
+      socket,
+      `${fallbackMessage} Avertissement : une nouvelle infraction dans les 30 minutes entrainera un mute temporaire.`,
+      privateContext
+    );
+    return;
+  }
+
+  const duration = getAutomaticMuteDuration(violationCount, severe);
+  const expiresAt = Date.now() + duration;
+  await saveTemporaryMute({
+    subjectKey: user.moderationSubjectKey,
+    displayName: user.nickname,
+    reason,
+    mutedBy: "Moderation automatique",
+    expiresAt,
+    createdAt: Date.now(),
+  });
+
+  const affectedRooms = new Set();
+  for (const connectedUser of users.values()) {
+    if (
+      connectedUser.moderationSubjectKey !== user.moderationSubjectKey ||
+      MODERATION_ROLES.has(connectedUser.role)
+    ) {
+      continue;
+    }
+    connectedUser.mutedUntil = expiresAt;
+    connectedUser.muteReason = reason;
+    connectedUser.cooldownUntil = expiresAt;
+    connectedUser.messageTimes = [];
+    clearUserTyping(connectedUser);
+    affectedRooms.add(connectedUser.room);
+  }
+  for (const room of affectedRooms) publishUsers(room);
+
+  await recordModerationAction(
+    { nickname: "Moderation automatique", role: "system" },
+    "auto_mute",
+    user.nickname,
+    `${reason} - ${formatModerationDuration(duration)}`
+  );
+
+  queueModerationAlert({
+    key: `auto-mute:${user.moderationSubjectKey}`,
+    subject: `Mute automatique : ${user.nickname}`,
+    textContent:
+      `Tchatelia a applique un mute temporaire a ${user.nickname}.\n\n` +
+      `Motif : ${reason}\n` +
+      `Duree : ${formatModerationDuration(duration)}\n` +
+      `Salon : #${user.room}\n` +
+      `Extrait : ${String(excerpt || "").slice(0, 240)}\n\n` +
+      `Ouvre le centre de moderation : ${PUBLIC_URL || "Tchatelia"}`,
+  });
+
+  emitModerationFeedback(
+    socket,
+    `Moderation automatique : tu es muet pendant ${formatModerationDuration(duration)}. Motif : ${reason}.`,
+    privateContext
+  );
+}
+
 function checkSpam(user, messageText) {
   if (MODERATION_ROLES.has(user.role)) {
     return { ok: true };
@@ -3341,6 +3630,7 @@ function checkSpam(user, messageText) {
     const seconds = Math.ceil((user.cooldownUntil - now) / 1000);
     return {
       ok: false,
+      violation: false,
       message: `Anti-spam : attends encore ${seconds}s avant de reparler.`,
     };
   }
@@ -3350,6 +3640,8 @@ function checkSpam(user, messageText) {
     user.cooldownUntil = now + DUPLICATE_COOLDOWN_MS;
     return {
       ok: false,
+      violation: true,
+      reason: "Message identique repete",
       message: "Anti-spam : evite d'envoyer deux fois le meme message.",
     };
   }
@@ -3361,6 +3653,8 @@ function checkSpam(user, messageText) {
     user.messageTimes = [];
     return {
       ok: false,
+      violation: true,
+      reason: "Rafale de messages",
       message: "Anti-spam : trop de messages d'un coup, pause de 15s.",
     };
   }
@@ -3404,6 +3698,29 @@ async function handleModeration(socket, admin, action, rawTarget) {
     return;
   }
 
+  if (action === "unmute" && !findUserByNickname(targetName)) {
+    const account = await getAccountByNickname(normalizedTarget);
+    const subjectKey = account ? `account:${account.nickname}` : "";
+    const activeMute = subjectKey
+      ? await getActiveTemporaryMute(subjectKey)
+      : null;
+    if (!activeMute) {
+      emitPrivateSystem(socket, `${targetName} n'est pas connecte ou n'est pas muet.`);
+      return;
+    }
+
+    await clearTemporaryMute(subjectKey);
+    automaticModerationStates.delete(subjectKey);
+    emitPrivateSystem(socket, `Mute retire pour ${account.displayName}.`);
+    await recordModerationAction(
+      admin,
+      "unmute",
+      account.displayName,
+      "Mute temporaire retire hors connexion"
+    );
+    return;
+  }
+
   const targetEntry = findUserByNickname(targetName);
   if (!targetEntry) {
     socket.emit("message", {
@@ -3426,6 +3743,41 @@ async function handleModeration(socket, admin, action, rawTarget) {
       text: "Un moderateur/admin ne peut pas exclure un autre membre de l'equipe.",
       createdAt: Date.now(),
     });
+    return;
+  }
+
+  if (action === "unmute") {
+    if (!targetUser.mutedUntil || targetUser.mutedUntil <= Date.now()) {
+      emitPrivateSystem(socket, `${targetUser.nickname} n'est pas muet.`);
+      return;
+    }
+
+    await clearTemporaryMute(targetUser.moderationSubjectKey);
+    automaticModerationStates.delete(targetUser.moderationSubjectKey);
+    const affectedRooms = new Set();
+    for (const connectedUser of users.values()) {
+      if (connectedUser.moderationSubjectKey !== targetUser.moderationSubjectKey) continue;
+      connectedUser.mutedUntil = 0;
+      connectedUser.muteReason = "";
+      connectedUser.cooldownUntil = 0;
+      connectedUser.messageTimes = [];
+      affectedRooms.add(connectedUser.room);
+    }
+    for (const room of affectedRooms) publishUsers(room);
+    const targetSocket = io.sockets.sockets.get(targetSocketId);
+    if (targetSocket) {
+      emitPrivateSystem(
+        targetSocket,
+        `${admin.nickname} a retire ton mute temporaire.`
+      );
+    }
+    emitPrivateSystem(socket, `Mute retire pour ${targetUser.nickname}.`);
+    await recordModerationAction(
+      admin,
+      "unmute",
+      targetUser.nickname,
+      `Mute temporaire retire dans #${targetUser.room}`
+    );
     return;
   }
 
@@ -3706,6 +4058,10 @@ function publishUsers(room) {
       role: user.role,
       gender: normalizeGender(user.gender),
       account: user.account,
+      mutedUntil:
+        !MODERATION_ROLES.has(user.role) && user.mutedUntil > Date.now()
+          ? user.mutedUntil
+          : 0,
       presenceStatus: PRESENCE_STATUSES.has(user.presenceStatus)
         ? user.presenceStatus
         : "online",

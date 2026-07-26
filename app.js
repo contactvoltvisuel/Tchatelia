@@ -1528,10 +1528,22 @@ function renderAdminPanel() {
     applyRoleClass(name, user.role);
     row.append(name);
 
+    const mutedUntil = Number(user.mutedUntil) || 0;
+    const isMuted = mutedUntil > Date.now();
+    if (isMuted) {
+      const muteStatus = document.createElement("small");
+      muteStatus.className = "admin-user-mute";
+      muteStatus.textContent = `Muet encore ${formatRemainingTime(mutedUntil)}`;
+      row.append(muteStatus);
+    }
+
     const actions = document.createElement("div");
     actions.className = "admin-actions";
 
     if (user.nickname !== currentNickname && user.role !== "admin" && user.role !== "moderator") {
+      if (isMuted) {
+        actions.append(createAdminButton("Demuter", "unmute", user.nickname));
+      }
       actions.append(createAdminButton("Kick", "kick", user.nickname));
       actions.append(createAdminButton("Ban", "ban", user.nickname));
     }
@@ -1875,6 +1887,8 @@ function formatLogAction(action) {
     kick: "Exclusion",
     ban: "Bannissement",
     unban: "Debannissement",
+    unmute: "Mute retire",
+    auto_mute: "Mute automatique",
     account_role: "Role modifie",
     account_enabled: "Compte reactive",
     account_disabled: "Compte desactive",
@@ -1893,7 +1907,19 @@ function formatLogAction(action) {
 function formatRole(role) {
   if (role === "admin") return "admin";
   if (role === "moderator") return "moderateur";
+  if (role === "system") return "automatique";
   return "utilisateur";
+}
+
+function formatRemainingTime(expiresAt) {
+  const remainingSeconds = Math.max(
+    1,
+    Math.ceil((Number(expiresAt) - Date.now()) / 1000)
+  );
+  if (remainingSeconds < 60) return `${remainingSeconds}s`;
+  const remainingMinutes = Math.ceil(remainingSeconds / 60);
+  if (remainingMinutes < 60) return `${remainingMinutes} min`;
+  return `${Math.ceil(remainingMinutes / 60)} h`;
 }
 
 function formatPresence(status) {

@@ -32,3 +32,9 @@ services:
         sync: false
       - key: MAIL_FROM_NAME
         value: "Tchatelia"
+      - key: AUTO_MODERATION
+        value: "true"
+      - key: AUTO_MODERATION_TERMS
+        sync: false
+      - key: MODERATION_ALERT_EMAIL
+        sync: false

@@ -51,6 +51,18 @@ export async function initDatabase() {
       created_at BIGINT NOT NULL
     );
 
+    CREATE TABLE IF NOT EXISTS temporary_mutes (
+      subject_key TEXT PRIMARY KEY,
+      display_name TEXT NOT NULL,
+      reason TEXT NOT NULL,
+      muted_by TEXT NOT NULL,
+      expires_at BIGINT NOT NULL,
+      created_at BIGINT NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS temporary_mutes_expires_idx
+      ON temporary_mutes (expires_at);
+
     CREATE TABLE IF NOT EXISTS accounts (
       nickname TEXT PRIMARY KEY,
       display_name TEXT NOT NULL,
@@ -975,6 +987,9 @@ export async function deleteAccount(nickname) {
       nickname,
     ]);
     await client.query("DELETE FROM account_sessions WHERE account_nickname = $1", [nickname]);
+    await client.query("DELETE FROM temporary_mutes WHERE subject_key = $1", [
+      `account:${nickname}`,
+    ]);
     await client.query("DELETE FROM message_favorites WHERE account_nickname = $1", [nickname]);
     await client.query(
       "DELETE FROM private_blocks WHERE blocker = $1 OR blocked = $1",
@@ -1257,6 +1272,50 @@ export async function trimRoomHistory(room, limit = 250) {
 export async function isBanned(nickname) {
   const result = await pool.query("SELECT 1 FROM bans WHERE nickname = $1", [nickname]);
   return result.rowCount > 0;
+}
+
+export async function getActiveTemporaryMute(subjectKey) {
+  const now = Date.now();
+  await pool.query("DELETE FROM temporary_mutes WHERE expires_at <= $1", [now]);
+  const result = await pool.query(
+    `
+      SELECT subject_key AS "subjectKey", display_name AS "displayName", reason,
+        muted_by AS "mutedBy", expires_at AS "expiresAt", created_at AS "createdAt"
+      FROM temporary_mutes
+      WHERE subject_key = $1 AND expires_at > $2
+    `,
+    [subjectKey, now]
+  );
+  return result.rows[0];
+}
+
+export async function saveTemporaryMute(mute) {
+  await pool.query(
+    `
+      INSERT INTO temporary_mutes (
+        subject_key, display_name, reason, muted_by, expires_at, created_at
+      )
+      VALUES ($1, $2, $3, $4, $5, $6)
+      ON CONFLICT (subject_key) DO UPDATE SET
+        display_name = EXCLUDED.display_name,
+        reason = EXCLUDED.reason,
+        muted_by = EXCLUDED.muted_by,
+        expires_at = EXCLUDED.expires_at,
+        created_at = EXCLUDED.created_at
+    `,
+    [
+      mute.subjectKey,
+      mute.displayName,
+      mute.reason,
+      mute.mutedBy,
+      mute.expiresAt,
+      mute.createdAt,
+    ]
+  );
+}
+
+export async function clearTemporaryMute(subjectKey) {
+  await pool.query("DELETE FROM temporary_mutes WHERE subject_key = $1", [subjectKey]);
 }
 
 export async function banNickname(nickname, displayName, bannedBy) {

@@ -402,6 +402,12 @@ button:hover {
   overflow-wrap: anywhere;
 }
 
+.admin-user .admin-user-mute {
+  color: #ff9a8f;
+  font-size: 12px;
+  font-weight: 800;
+}
+
 .admin-actions {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -5454,6 +5460,10 @@ html[data-theme="light"] .private-conversation-button,
 html[data-theme="light"] .private-message {
   color: var(--ink);
   background: #f7f9fc;
+}
+
+html[data-theme="light"] .admin-user .admin-user-mute {
+  color: #b42318;
 }
 
 html[data-theme="light"] .theme-options {
