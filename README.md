@@ -42,7 +42,7 @@ Prerequis : Node.js 24 ou plus recent.
 - Protection publique : limites de connexion et d'inscription, verrouillage apres plusieurs echecs
   et journal de securite reserve aux administrateurs.
 - En-tetes de securite du navigateur, controle des origines et taille limitee des requetes.
-- Nouveaux mots de passe de 12 a 128 caracteres avec refus des choix trop previsibles.
+- Nouveaux mots de passe de 8 a 128 caracteres avec refus des choix trop previsibles.
 - Verification anti-robot Cloudflare Turnstile activable gratuitement.
 - Recuperation du mot de passe par e-mail avec un lien unique valable 30 minutes.
 - Verification des nouvelles adresses e-mail avec un lien unique valable 24 heures.
@@ -126,7 +126,7 @@ Sans `DATABASE_URL`, Tchatelia utilise automatiquement SQLite local.
 La protection publique est active par defaut. Elle limite les tentatives de connexion, la creation
 de comptes et le nombre de connexions simultanees depuis une meme source. Apres cinq echecs
 d'authentification, l'acces est verrouille pendant 15 minutes. Les nouveaux mots de passe doivent
-contenir entre 12 et 128 caracteres et ne peuvent pas reprendre le pseudo, l'adresse e-mail ou un
+contenir entre 8 et 128 caracteres et ne peuvent pas reprendre le pseudo, l'adresse e-mail ou un
 mot de passe trop previsible. Les comptes existants continuent de fonctionner avec leur mot de
 passe actuel jusqu'a son prochain changement.
 

@@ -1,12 +1,18 @@
-export const MIN_PASSWORD_LENGTH = 12;
+export const MIN_PASSWORD_LENGTH = 8;
 export const MAX_PASSWORD_LENGTH = 128;
 
 const COMMON_PASSWORDS = new Set([
+  "12345678",
   "123456789012",
+  "azertyui",
   "azertyuiop12",
+  "motdepasse",
   "motdepasse12",
+  "password",
   "password1234",
+  "tchatelia",
   "tchatelia123",
+  "qwertyui",
   "qwertyuiop12",
 ]);
 
