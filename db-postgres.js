@@ -30,6 +30,7 @@ export async function initDatabase() {
       text TEXT NOT NULL,
       author_id TEXT NOT NULL DEFAULT '',
       author_gender TEXT NOT NULL DEFAULT 'other',
+      author_role TEXT NOT NULL DEFAULT 'user',
       reply_to_id TEXT NOT NULL DEFAULT '',
       reply_to_nickname TEXT NOT NULL DEFAULT '',
       reply_to_text TEXT NOT NULL DEFAULT '',
@@ -214,6 +215,9 @@ export async function initDatabase() {
   await pool.query(
     "ALTER TABLE messages ADD COLUMN IF NOT EXISTS author_gender TEXT NOT NULL DEFAULT 'other'"
   );
+  await pool.query(
+    "ALTER TABLE messages ADD COLUMN IF NOT EXISTS author_role TEXT NOT NULL DEFAULT 'user'"
+  );
   await pool.query("ALTER TABLE messages ADD COLUMN IF NOT EXISTS reply_to_id TEXT NOT NULL DEFAULT ''");
   await pool.query(
     "ALTER TABLE messages ADD COLUMN IF NOT EXISTS reply_to_nickname TEXT NOT NULL DEFAULT ''"
@@ -232,6 +236,12 @@ export async function initDatabase() {
   );
   await pool.query("ALTER TABLE messages ADD COLUMN IF NOT EXISTS pinned_at BIGINT");
   await pool.query("ALTER TABLE messages ADD COLUMN IF NOT EXISTS pinned_by TEXT NOT NULL DEFAULT ''");
+  await pool.query(`
+    UPDATE messages
+    SET author_role = accounts.role
+    FROM accounts
+    WHERE messages.author_id = 'account:' || accounts.nickname
+  `);
 
   for (const [name, topic] of defaultRooms) {
     await pool.query(
@@ -489,7 +499,7 @@ export async function getMessageById(id) {
   const result = await pool.query(
     `
       SELECT id, room, type, nickname, text, author_id AS "authorId",
-        author_gender AS gender,
+        author_gender AS gender, author_role AS role,
         reply_to_id AS "replyToId", reply_to_nickname AS "replyToNickname",
         reply_to_text AS "replyToText", reply_to_deleted AS "replyToDeleted",
         edited_at AS "editedAt", deleted_at AS "deletedAt", deleted_by AS "deletedBy",
@@ -1008,7 +1018,7 @@ export async function getRoomHistory(room, limit = 80) {
   const result = await pool.query(
     `
       SELECT id, type, nickname, text, author_id AS "authorId",
-        author_gender AS gender,
+        author_gender AS gender, author_role AS role,
         reply_to_id AS "replyToId", reply_to_nickname AS "replyToNickname",
         reply_to_text AS "replyToText", reply_to_deleted AS "replyToDeleted",
         edited_at AS "editedAt", deleted_at AS "deletedAt", deleted_by AS "deletedBy",
@@ -1034,13 +1044,13 @@ export async function saveMessage(room, message) {
   await pool.query(
     `
       INSERT INTO messages (
-        id, room, type, nickname, text, author_id, author_gender,
+        id, room, type, nickname, text, author_id, author_gender, author_role,
         reply_to_id, reply_to_nickname, reply_to_text, reply_to_deleted,
         edited_at, deleted_at, deleted_by, reaction_data, pinned_at, pinned_by, created_at
       )
       VALUES (
         $1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
-        $11, $12, $13, $14, $15, $16, $17, $18
+        $11, $12, $13, $14, $15, $16, $17, $18, $19
       )
       ON CONFLICT (id) DO UPDATE SET
         room = EXCLUDED.room,
@@ -1049,6 +1059,7 @@ export async function saveMessage(room, message) {
         text = EXCLUDED.text,
         author_id = EXCLUDED.author_id,
         author_gender = EXCLUDED.author_gender,
+        author_role = EXCLUDED.author_role,
         reply_to_id = EXCLUDED.reply_to_id,
         reply_to_nickname = EXCLUDED.reply_to_nickname,
         reply_to_text = EXCLUDED.reply_to_text,
@@ -1069,6 +1080,7 @@ export async function saveMessage(room, message) {
       message.text,
       message.authorId || "",
       message.gender || "other",
+      message.role || "user",
       message.replyToId || "",
       message.replyToNickname || "",
       message.replyToText || "",

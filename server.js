@@ -1291,6 +1291,7 @@ io.on("connection", (socket) => {
         text: messageText.slice(4),
         authorId: user.messageAuthorId,
         gender: user.gender,
+        role: user.role,
         ...reply,
         createdAt: Date.now(),
       }, socket.id);
@@ -1304,6 +1305,7 @@ io.on("connection", (socket) => {
       text: messageText,
       authorId: user.messageAuthorId,
       gender: user.gender,
+      role: user.role,
       ...reply,
       createdAt: Date.now(),
     }, socket.id);
@@ -3535,6 +3537,7 @@ function serializeMessageForUser(message, user, room) {
     type: message.type,
     nickname: message.nickname,
     gender: normalizeGender(message.gender),
+    role: MODERATION_ROLES.has(message.role) ? message.role : "user",
     text: deletedAt ? "" : message.text,
     authorAccountNickname,
     replyToId: hideReply ? "" : message.replyToId || "",

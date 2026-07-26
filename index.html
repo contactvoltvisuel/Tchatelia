@@ -332,6 +332,15 @@
                 <span class="button-label">Parametres</span>
               </button>
               <button
+                class="ghost-button"
+                id="themeToggleButton"
+                type="button"
+                title="Passer au mode clair"
+              >
+                <span id="themeToggleIcon" aria-hidden="true">&#9728;</span>
+                <span class="button-label" id="themeToggleLabel">Clair</span>
+              </button>
+              <button
                 class="ghost-button notification-toggle"
                 id="notificationToggleButton"
                 type="button"
@@ -670,6 +679,22 @@
       <form class="settings-form" id="settingsGeneralForm">
         <section class="settings-section">
           <h3>Profil et confidentialite</h3>
+          <fieldset class="settings-theme-field">
+            <legend>Apparence du chat</legend>
+            <div class="theme-options">
+              <label>
+                <input type="radio" name="settingsTheme" value="dark" />
+                <span aria-hidden="true">&#9790;</span>
+                Sombre
+              </label>
+              <label>
+                <input type="radio" name="settingsTheme" value="light" />
+                <span aria-hidden="true">&#9728;</span>
+                Clair
+              </label>
+            </div>
+            <small>Ce choix est memorise sur cet appareil.</small>
+          </fieldset>
           <label for="settingsDisplayName">Nom affiche</label>
           <input
             id="settingsDisplayName"
@@ -933,6 +958,6 @@
     </dialog>
 
     <script src="/socket.io/socket.io.js"></script>
-    <script src="/app.js?v=20260726-3"></script>
+    <script src="/app.js?v=20260726-4"></script>
   </body>
 </html>

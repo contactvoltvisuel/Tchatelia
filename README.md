@@ -14,6 +14,7 @@ Prerequis : Node.js 24 ou plus recent.
 - Gestion admin des comptes : role, activation et reinitialisation de mot de passe.
 - Salons publics : `#accueil`, `#aide`, `#musique`, `#rencontres`.
 - Interface responsive avec panneaux de salons et de membres adaptes au mobile.
+- Themes sombre et clair, memorises localement pour les comptes et les invites.
 - Centre de moderation dans une fenetre dediee.
 - Messages instantanes avec Socket.IO.
 - Reponses avec citation, modification par l'auteur et suppression par l'auteur ou la moderation.
@@ -27,6 +28,7 @@ Prerequis : Node.js 24 ou plus recent.
 - Liste des personnes connectees dans le salon.
 - Connexion admin avec mot de passe.
 - Role moderateur : kick, ban et unban sans acces a la gestion complete.
+- Couleurs de pseudo distinctes et persistantes pour les administrateurs et moderateurs.
 - Journal de moderation persistant : exclusions, bannissements, comptes et salons.
 - Profils utilisateurs : photo importee ou avatar par lien, description, role et date d'inscription.
 - Blocage global des comptes : messages publics, alertes, saisie et messages prives.

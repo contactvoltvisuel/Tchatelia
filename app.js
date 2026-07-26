@@ -1,3 +1,7 @@
+const THEME_STORAGE_KEY = "tchateliaTheme";
+let currentTheme = getStoredTheme();
+document.documentElement.dataset.theme = currentTheme;
+
 const socket = io();
 
 const loginPanel = document.querySelector("#loginPanel");
@@ -123,6 +127,9 @@ const currentUserRole = document.querySelector("#currentUserRole");
 const currentUserInitials = document.querySelector("#currentUserInitials");
 const sidebarProfileButton = document.querySelector("#sidebarProfileButton");
 const accountSettingsButton = document.querySelector("#accountSettingsButton");
+const themeToggleButton = document.querySelector("#themeToggleButton");
+const themeToggleIcon = document.querySelector("#themeToggleIcon");
+const themeToggleLabel = document.querySelector("#themeToggleLabel");
 const sidebarCreateRoomButton = document.querySelector("#sidebarCreateRoomButton");
 const adminPanelButton = document.querySelector("#adminPanelButton");
 const adminDialog = document.querySelector("#adminDialog");
@@ -144,6 +151,7 @@ const settingsResendVerificationButton = document.querySelector(
 );
 const settingsNotifications = document.querySelector("#settingsNotifications");
 const settingsPrivateMessages = document.querySelector("#settingsPrivateMessages");
+const settingsThemeInputs = document.querySelectorAll('input[name="settingsTheme"]');
 const settingsGeneralStatus = document.querySelector("#settingsGeneralStatus");
 const settingsPasswordForm = document.querySelector("#settingsPasswordForm");
 const settingsCurrentPassword = document.querySelector("#settingsCurrentPassword");
@@ -226,6 +234,7 @@ const PRESENCE_LABELS = {
   busy: "Occupe",
 };
 const GENDER_CLASS_NAMES = ["gender-man", "gender-woman", "gender-other"];
+const ROLE_CLASS_NAMES = ["role-admin", "role-moderator"];
 const REACTION_OPTIONS = [
   { key: "like", emoji: "\u{1F44D}", label: "J'aime" },
   { key: "heart", emoji: "\u{2764}\u{FE0F}", label: "J'adore" },
@@ -239,6 +248,7 @@ let alertsEnabled =
 const unreadByRoom = new Map();
 
 updateAuthModeRequirements();
+updateThemeControls();
 openPasswordResetConfirmationFromUrl();
 openEmailVerificationFromUrl();
 initializeApplication();
@@ -548,6 +558,16 @@ sidebarProfileButton.addEventListener("click", () => {
 });
 
 accountSettingsButton.addEventListener("click", openAccountSettings);
+
+themeToggleButton.addEventListener("click", () => {
+  setTheme(currentTheme === "dark" ? "light" : "dark");
+});
+
+settingsThemeInputs.forEach((input) => {
+  input.addEventListener("change", () => {
+    if (input.checked) setTheme(input.value);
+  });
+});
 
 roomSidebarButton.addEventListener("click", () => {
   openMobilePanel(roomSidebar);
@@ -1030,6 +1050,7 @@ socket.on("users", (users) => {
     const name = document.createElement("strong");
     name.textContent = user.nickname;
     applyGenderClass(name, user.gender);
+    applyRoleClass(name, user.role);
 
     const role = document.createElement("small");
     const roleLabel =
@@ -1428,6 +1449,7 @@ function markCurrentRoomRead() {
 function updateCurrentUserSummary() {
   currentUserName.textContent = currentNickname || "Invite";
   applyGenderClass(currentUserName, currentGender);
+  applyRoleClass(currentUserName, currentRole);
   currentUserRole.textContent =
     currentRole === "admin" || currentRole === "moderator"
       ? formatRole(currentRole)
@@ -1503,6 +1525,7 @@ function renderAdminPanel() {
 
     const name = document.createElement("span");
     name.textContent = formatUserName(user);
+    applyRoleClass(name, user.role);
     row.append(name);
 
     const actions = document.createElement("div");
@@ -1946,6 +1969,7 @@ function openAccountSettings() {
   settingsPasswordForm.reset();
   settingsDeleteForm.reset();
   settingsNotifications.checked = alertsEnabled;
+  updateThemeControls();
   settingsBlockedList.innerHTML = "";
   settingsBlockedCount.textContent = "0";
   setSettingsStatus(settingsGeneralStatus, "");
@@ -1981,6 +2005,7 @@ function renderAccountSettings(settings) {
   );
   settingsNotifications.checked = alertsEnabled;
   settingsPrivateMessages.checked = settings.privateMessagesEnabled;
+  updateThemeControls();
   settingsBlockedList.innerHTML = "";
   settingsBlockedCount.textContent = String(settings.blockedUsers.length);
 
@@ -2042,6 +2067,7 @@ function renderProfile(profile) {
   currentProfileBlockedByMe = Boolean(profile.blockedByMe);
   profileNickname.textContent = profile.nickname;
   applyGenderClass(profileNickname, profile.gender);
+  applyRoleClass(profileNickname, profile.role);
   profileRole.textContent = profile.account ? formatRole(profile.role) : "invite";
   profileBio.textContent = profile.bio || "Aucune description.";
   profileMemberSince.textContent = profile.account
@@ -2125,6 +2151,52 @@ function applyGenderClass(element, gender) {
   element.classList.add(`gender-${normalizeGender(gender)}`);
 }
 
+function normalizeDisplayRole(value) {
+  return value === "admin" || value === "moderator" ? value : "user";
+}
+
+function applyRoleClass(element, role) {
+  element.classList.remove(...ROLE_CLASS_NAMES);
+  const normalizedRole = normalizeDisplayRole(role);
+  if (normalizedRole !== "user") {
+    element.classList.add(`role-${normalizedRole}`);
+  }
+}
+
+function getStoredTheme() {
+  try {
+    return localStorage.getItem(THEME_STORAGE_KEY) === "light" ? "light" : "dark";
+  } catch {
+    return "dark";
+  }
+}
+
+function setTheme(theme, { persist = true } = {}) {
+  currentTheme = theme === "light" ? "light" : "dark";
+  document.documentElement.dataset.theme = currentTheme;
+  if (persist) {
+    try {
+      localStorage.setItem(THEME_STORAGE_KEY, currentTheme);
+    } catch {
+      // The selected theme still applies for the current page.
+    }
+  }
+  updateThemeControls();
+}
+
+function updateThemeControls() {
+  const lightTheme = currentTheme === "light";
+  themeToggleIcon.textContent = lightTheme ? "\u263e" : "\u2600";
+  themeToggleLabel.textContent = lightTheme ? "Sombre" : "Clair";
+  themeToggleButton.title = lightTheme
+    ? "Passer au mode sombre"
+    : "Passer au mode clair";
+  themeToggleButton.setAttribute("aria-pressed", String(lightTheme));
+  settingsThemeInputs.forEach((input) => {
+    input.checked = input.value === currentTheme;
+  });
+}
+
 function openReportDialog(report) {
   if (!currentAccount) {
     alert("Cree un compte pour envoyer un signalement.");
@@ -2200,6 +2272,7 @@ function renderPrivateState(totalUnread) {
     const title = document.createElement("strong");
     title.textContent = conversation.nickname;
     applyGenderClass(title, conversation.gender);
+    applyRoleClass(title, conversation.role);
 
     const preview = document.createElement("small");
     preview.textContent = conversation.lastText;
@@ -2234,6 +2307,7 @@ function renderPrivateConversation(conversation) {
   privateActive.classList.remove("hidden");
   privateNickname.textContent = conversation.participant.nickname;
   applyGenderClass(privateNickname, conversation.participant.gender);
+  applyRoleClass(privateNickname, conversation.participant.role);
   setAvatar(
     privateAvatarImage,
     privateAvatarFallback,
@@ -2914,6 +2988,8 @@ function renderMessage(message) {
   }).format(message.createdAt);
 
   const connectedUser = currentUsers.find((user) => user.nickname === message.nickname);
+  const authorRole = normalizeDisplayRole(message.role || connectedUser?.role);
+  applyRoleClass(row, authorRole);
   row.classList.toggle("from-me", message.nickname === currentNickname);
   row.append(
     createAvatar(
@@ -2999,10 +3075,10 @@ function renderMessage(message) {
     !message.deletedAt && mentionsCurrentUser(message.text)
   );
 
-  if (connectedUser?.role === "admin" || connectedUser?.role === "moderator") {
+  if (authorRole === "admin" || authorRole === "moderator") {
     const role = document.createElement("span");
     role.className = "message-role";
-    role.textContent = connectedUser.role === "admin" ? "admin" : "modo";
+    role.textContent = authorRole === "admin" ? "admin" : "modo";
     content.querySelector(".message-meta").append(role);
   }
 

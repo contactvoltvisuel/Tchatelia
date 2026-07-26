@@ -34,6 +34,7 @@ export async function initDatabase() {
       text TEXT NOT NULL,
       author_id TEXT NOT NULL DEFAULT '',
       author_gender TEXT NOT NULL DEFAULT 'other',
+      author_role TEXT NOT NULL DEFAULT 'user',
       reply_to_id TEXT NOT NULL DEFAULT '',
       reply_to_nickname TEXT NOT NULL DEFAULT '',
       reply_to_text TEXT NOT NULL DEFAULT '',
@@ -259,6 +260,7 @@ export async function initDatabase() {
   const messageMigrations = [
     "ALTER TABLE messages ADD COLUMN author_id TEXT NOT NULL DEFAULT ''",
     "ALTER TABLE messages ADD COLUMN author_gender TEXT NOT NULL DEFAULT 'other'",
+    "ALTER TABLE messages ADD COLUMN author_role TEXT NOT NULL DEFAULT 'user'",
     "ALTER TABLE messages ADD COLUMN reply_to_id TEXT NOT NULL DEFAULT ''",
     "ALTER TABLE messages ADD COLUMN reply_to_nickname TEXT NOT NULL DEFAULT ''",
     "ALTER TABLE messages ADD COLUMN reply_to_text TEXT NOT NULL DEFAULT ''",
@@ -278,6 +280,19 @@ export async function initDatabase() {
       if (!String(error.message).includes("duplicate column")) throw error;
     }
   }
+
+  db.exec(`
+    UPDATE messages
+    SET author_role = COALESCE(
+      (
+        SELECT accounts.role
+        FROM accounts
+        WHERE messages.author_id = 'account:' || accounts.nickname
+      ),
+      author_role
+    )
+    WHERE author_id LIKE 'account:%'
+  `);
 
   const insertRoom = db.prepare(`
     INSERT OR IGNORE INTO rooms (name, topic, created_at)
@@ -509,7 +524,7 @@ export async function getMessageById(id) {
   return db
     .prepare(`
       SELECT id, room, type, nickname, text, author_id AS authorId,
-        author_gender AS gender,
+        author_gender AS gender, author_role AS role,
         reply_to_id AS replyToId, reply_to_nickname AS replyToNickname,
         reply_to_text AS replyToText, reply_to_deleted AS replyToDeleted,
         edited_at AS editedAt, deleted_at AS deletedAt, deleted_by AS deletedBy,
@@ -955,7 +970,7 @@ export async function getRoomHistory(room, limit = 80) {
   return db
     .prepare(`
       SELECT id, type, nickname, text, author_id AS authorId,
-        author_gender AS gender,
+        author_gender AS gender, author_role AS role,
         reply_to_id AS replyToId, reply_to_nickname AS replyToNickname,
         reply_to_text AS replyToText, reply_to_deleted AS replyToDeleted,
         edited_at AS editedAt, deleted_at AS deletedAt, deleted_by AS deletedBy,
@@ -977,11 +992,11 @@ export async function getRoomHistory(room, limit = 80) {
 export async function saveMessage(room, message) {
   db.prepare(`
     INSERT OR REPLACE INTO messages (
-      id, room, type, nickname, text, author_id, author_gender,
+      id, room, type, nickname, text, author_id, author_gender, author_role,
       reply_to_id, reply_to_nickname, reply_to_text, reply_to_deleted,
       edited_at, deleted_at, deleted_by, reaction_data, pinned_at, pinned_by, created_at
     )
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
     message.id,
     room,
@@ -990,6 +1005,7 @@ export async function saveMessage(room, message) {
     message.text,
     message.authorId || "",
     message.gender || "other",
+    message.role || "user",
     message.replyToId || "",
     message.replyToNickname || "",
     message.replyToText || "",
