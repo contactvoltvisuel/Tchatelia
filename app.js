@@ -12,6 +12,9 @@ const popularRoomCounts = document.querySelectorAll("[data-room-count]");
 const accountPasswordInput = document.querySelector("#accountPassword");
 const accountEmailField = document.querySelector("#accountEmailField");
 const accountEmailInput = document.querySelector("#accountEmail");
+const accountGenderField = document.querySelector("#accountGenderField");
+const adminAccessField = document.querySelector("#adminAccessField");
+const adminPasswordInput = document.querySelector("#adminPassword");
 const forgotPasswordButton = document.querySelector("#forgotPasswordButton");
 const authModeInputs = document.querySelectorAll('input[name="authMode"]');
 const loginSecurity = document.querySelector("#loginSecurity");
@@ -179,6 +182,7 @@ const emailVerificationStatus = document.querySelector("#emailVerificationStatus
 let currentRoom = "accueil";
 let currentNickname = "";
 let currentRole = "user";
+let currentGender = "other";
 let currentAccount = false;
 let currentAccountNickname = "";
 let currentPresenceStatus = "online";
@@ -212,6 +216,7 @@ let passwordResetEnabled = false;
 let emailVerificationEnabled = false;
 let minimumPasswordLength = 12;
 let maximumPasswordLength = 128;
+let adminAccessAllowed = true;
 let activePasswordResetToken = "";
 let activeVerificationEmail = "";
 const currentRoomMessages = new Map();
@@ -220,6 +225,7 @@ const PRESENCE_LABELS = {
   away: "Absent",
   busy: "Occupe",
 };
+const GENDER_CLASS_NAMES = ["gender-man", "gender-woman", "gender-other"];
 const REACTION_OPTIONS = [
   { key: "like", emoji: "\u{1F44D}", label: "J'aime" },
   { key: "heart", emoji: "\u{2764}\u{FE0F}", label: "J'adore" },
@@ -285,6 +291,7 @@ loginForm.addEventListener("submit", async (event) => {
         adminPassword: "",
         accountPassword: "",
         accountEmail: "",
+        accountGender: "",
         authMode: "session",
         legalAccepted: true,
         turnstileToken: "",
@@ -298,6 +305,7 @@ loginForm.addEventListener("submit", async (event) => {
       adminPassword: data.get("adminPassword"),
       accountPassword: data.get("accountPassword"),
       accountEmail: data.get("accountEmail"),
+      accountGender: data.get("accountGender"),
       authMode,
       legalAccepted: data.get("legalAccepted") === "on",
       turnstileToken,
@@ -996,6 +1004,7 @@ socket.on("users", (users) => {
   const me = users.find((user) => user.nickname === currentNickname);
   if (me) {
     currentRole = me.role;
+    currentGender = normalizeGender(me.gender);
     currentPresenceStatus = me.presenceStatus || "online";
     presenceSelect.value = currentPresenceStatus;
   }
@@ -1020,6 +1029,7 @@ socket.on("users", (users) => {
 
     const name = document.createElement("strong");
     name.textContent = user.nickname;
+    applyGenderClass(name, user.gender);
 
     const role = document.createElement("small");
     const roleLabel =
@@ -1417,6 +1427,7 @@ function markCurrentRoomRead() {
 
 function updateCurrentUserSummary() {
   currentUserName.textContent = currentNickname || "Invite";
+  applyGenderClass(currentUserName, currentGender);
   currentUserRole.textContent =
     currentRole === "admin" || currentRole === "moderator"
       ? formatRole(currentRole)
@@ -1664,6 +1675,7 @@ function formatSecurityEvent(eventType) {
   const labels = {
     account_password_failure: "Mot de passe incorrect",
     admin_password_failure: "Acces admin refuse",
+    admin_ip_denied: "Adresse IP admin refusee",
     unknown_account: "Compte inconnu",
     temporary_lock: "Verrouillage temporaire",
     access_rate_limit: "Trop de tentatives",
@@ -2029,6 +2041,7 @@ function renderProfile(profile) {
   currentProfileNickname = profile.nickname;
   currentProfileBlockedByMe = Boolean(profile.blockedByMe);
   profileNickname.textContent = profile.nickname;
+  applyGenderClass(profileNickname, profile.gender);
   profileRole.textContent = profile.account ? formatRole(profile.role) : "invite";
   profileBio.textContent = profile.bio || "Aucune description.";
   profileMemberSince.textContent = profile.account
@@ -2100,6 +2113,16 @@ function setAvatar(image, fallback, avatarUrl, nickname) {
 
 function getInitials(nickname) {
   return String(nickname || "?").slice(0, 2).toUpperCase();
+}
+
+function normalizeGender(value) {
+  const gender = String(value || "").trim().toLocaleLowerCase("fr-FR");
+  return GENDER_CLASS_NAMES.includes(`gender-${gender}`) ? gender : "other";
+}
+
+function applyGenderClass(element, gender) {
+  element.classList.remove(...GENDER_CLASS_NAMES);
+  element.classList.add(`gender-${normalizeGender(gender)}`);
 }
 
 function openReportDialog(report) {
@@ -2176,6 +2199,7 @@ function renderPrivateState(totalUnread) {
 
     const title = document.createElement("strong");
     title.textContent = conversation.nickname;
+    applyGenderClass(title, conversation.gender);
 
     const preview = document.createElement("small");
     preview.textContent = conversation.lastText;
@@ -2209,6 +2233,7 @@ function renderPrivateConversation(conversation) {
   privateEmpty.classList.add("hidden");
   privateActive.classList.remove("hidden");
   privateNickname.textContent = conversation.participant.nickname;
+  applyGenderClass(privateNickname, conversation.participant.gender);
   setAvatar(
     privateAvatarImage,
     privateAvatarFallback,
@@ -2336,7 +2361,11 @@ function updateAuthModeRequirements() {
     mode === "register" ? minimumPasswordLength : 0;
   accountPasswordInput.maxLength = maximumPasswordLength;
   accountEmailField.classList.toggle("hidden", mode !== "register");
+  accountGenderField.classList.toggle("hidden", mode !== "register");
   accountEmailInput.required = mode === "register";
+  adminAccessField.classList.toggle("hidden", !adminAccessAllowed);
+  adminPasswordInput.disabled = !adminAccessAllowed;
+  if (!adminAccessAllowed) adminPasswordInput.value = "";
   forgotPasswordButton.classList.toggle(
     "hidden",
     mode !== "login" || !passwordResetEnabled
@@ -2397,6 +2426,7 @@ async function tryAutomaticLogin() {
         adminPassword: "",
         accountPassword: "",
         accountEmail: "",
+        accountGender: "",
         authMode: "session",
         legalAccepted: true,
         turnstileToken: "",
@@ -2465,6 +2495,7 @@ function joinChat(payload, { automatic = false } = {}) {
     currentRoom = response.room;
     currentNickname = response.nickname;
     currentRole = response.role;
+    currentGender = normalizeGender(response.gender);
     currentAccount = response.account;
     currentAccountNickname = response.accountNickname;
     if (currentAccount) {
@@ -2511,6 +2542,7 @@ async function initializePublicProtection() {
     const config = await response.json();
     passwordResetEnabled = Boolean(config.passwordResetEnabled);
     emailVerificationEnabled = Boolean(config.emailVerificationEnabled);
+    adminAccessAllowed = config.adminAccessAllowed !== false;
     minimumPasswordLength =
       Number(config.minPasswordLength) || minimumPasswordLength;
     maximumPasswordLength =
@@ -2856,6 +2888,7 @@ function mentionsCurrentUser(text) {
 function renderMessage(message) {
   const row = document.createElement("article");
   row.className = `message ${message.type}`;
+  applyGenderClass(row, message.gender);
   row.dataset.messageId = message.id;
   row.dataset.searchText = normalizeMessageSearch(
     [
@@ -2884,7 +2917,11 @@ function renderMessage(message) {
   row.classList.toggle("from-me", message.nickname === currentNickname);
   row.append(
     createAvatar(
-      connectedUser || { nickname: message.nickname, avatarUrl: "" },
+      connectedUser || {
+        nickname: message.nickname,
+        avatarUrl: "",
+        gender: message.gender,
+      },
       "message-avatar"
     )
   );

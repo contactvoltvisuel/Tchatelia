@@ -97,11 +97,20 @@ Pour changer ce mot de passe, copier `.env.example` en `.env`, puis remplacer :
 
 ```text
 ADMIN_PASSWORD=change-moi
+ADMIN_ALLOWED_IPS=203.0.113.8
 ```
 
 Un compte cree en mode `Inscription` avec le bon mot de passe admin devient un
 compte admin sauvegarde. Ensuite, il suffit de se connecter en mode `Connexion`
 avec le pseudo et le mot de passe du compte.
+
+`ADMIN_ALLOWED_IPS` limite l'affichage du champ admin, la connexion aux comptes
+administrateurs et la commande `/admin` a l'adresse IP indiquee. Plusieurs
+adresses peuvent etre separees par des virgules. Laisser la variable vide
+desactive cette restriction. Cette valeur doit etre ajoutee dans Render et ne
+doit pas etre publiee sur GitHub. Si l'adresse IP de la connexion Internet
+change, il faut mettre a jour cette variable avant de pouvoir se reconnecter en
+administrateur.
 
 Pour utiliser Supabase ou PostgreSQL, ajouter aussi :
 
@@ -183,9 +192,9 @@ Pour une premiere mise en ligne gratuite :
 5. Choisir ce depot GitHub.
 6. Utiliser `npm install` comme commande d'installation.
 7. Utiliser `npm start` comme commande de demarrage.
-8. Ajouter dans Render les variables `ADMIN_PASSWORD`, `DATABASE_URL`, `DATABASE_SSL=true`,
-   `PUBLIC_PROTECTION=true`, `SECURITY_HASH_SECRET`, `PUBLIC_URL`, `BREVO_API_KEY`,
-   `MAIL_FROM_EMAIL` et `MAIL_FROM_NAME`.
+8. Ajouter dans Render les variables `ADMIN_PASSWORD`, `ADMIN_ALLOWED_IPS`, `DATABASE_URL`,
+   `DATABASE_SSL=true`, `PUBLIC_PROTECTION=true`, `SECURITY_HASH_SECRET`, `PUBLIC_URL`,
+   `BREVO_API_KEY`, `MAIL_FROM_EMAIL` et `MAIL_FROM_NAME`.
 
 Important : utiliser `npm install`, pas `npm ci`, car Render doit installer la
 dependance PostgreSQL `pg` a partir de `package.json`.

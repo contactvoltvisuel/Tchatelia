@@ -61,3 +61,39 @@ export function isAllowedOrigin(originHeader, allowedOrigins) {
     return false;
   }
 }
+
+export function normalizeIpAddress(value) {
+  let address = String(value || "").trim().toLocaleLowerCase("en-US");
+  if (!address) return "";
+
+  if (address.startsWith("[") && address.includes("]")) {
+    address = address.slice(1, address.indexOf("]"));
+  }
+  if (address.startsWith("::ffff:")) {
+    address = address.slice(7);
+  }
+  if (address === "::1") return "127.0.0.1";
+  if (/^\d{1,3}(?:\.\d{1,3}){3}:\d+$/.test(address)) {
+    address = address.slice(0, address.lastIndexOf(":"));
+  }
+  return address;
+}
+
+export function parseAllowedIpAddresses(value) {
+  return [
+    ...new Set(
+      String(value || "")
+        .split(",")
+        .map(normalizeIpAddress)
+        .filter(Boolean)
+    ),
+  ];
+}
+
+export function isIpAddressAllowed(value, allowedAddresses) {
+  const allowed = Array.isArray(allowedAddresses)
+    ? allowedAddresses
+    : [...(allowedAddresses || [])];
+  if (!allowed.length) return true;
+  return allowed.includes(normalizeIpAddress(value));
+}

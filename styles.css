@@ -3872,6 +3872,90 @@ a {
   color: var(--muted);
 }
 
+.account-gender-field {
+  min-width: 0;
+  display: grid;
+  gap: 8px;
+  margin: 2px 0;
+  padding: 0;
+  border: 0;
+}
+
+.account-gender-field legend {
+  margin-bottom: 8px;
+  color: #b5bed0;
+  font-size: 12px;
+}
+
+.gender-options {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.gender-options label {
+  min-width: 0;
+  min-height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 7px 8px;
+  border: 1px solid #303a56;
+  border-radius: 7px;
+  color: #aab4c6;
+  background: #0d1426;
+  cursor: pointer;
+  transition:
+    border-color 160ms ease,
+    color 160ms ease,
+    background 160ms ease;
+}
+
+.gender-options label:has(input:checked) {
+  border-color: #7c5cff;
+  color: #ffffff;
+  background: rgba(124, 92, 255, 0.13);
+}
+
+.gender-options input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+}
+
+.gender-swatch {
+  width: 9px;
+  height: 9px;
+  flex: 0 0 9px;
+  border-radius: 50%;
+  box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.05);
+}
+
+.gender-swatch-man {
+  background: #5bbcff;
+}
+
+.gender-swatch-woman {
+  background: #ff78bd;
+}
+
+.gender-swatch-other {
+  background: #d4dae6;
+}
+
+.account-gender-field > small {
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.4;
+}
+
+.admin-access-field {
+  display: grid;
+  gap: 8px;
+}
+
 .forgot-password-button {
   min-height: 30px;
   justify-self: start;
@@ -4331,6 +4415,30 @@ a {
 
 .message-meta strong {
   color: #f5f7ff;
+}
+
+.message.gender-man .message-meta strong,
+.profile-user-copy strong.gender-man,
+#currentUserName.gender-man,
+#profileNickname.gender-man,
+#privateNickname.gender-man {
+  color: #5bbcff;
+}
+
+.message.gender-woman .message-meta strong,
+.profile-user-copy strong.gender-woman,
+#currentUserName.gender-woman,
+#profileNickname.gender-woman,
+#privateNickname.gender-woman {
+  color: #ff78bd;
+}
+
+.message.gender-other .message-meta strong,
+.profile-user-copy strong.gender-other,
+#currentUserName.gender-other,
+#profileNickname.gender-other,
+#privateNickname.gender-other {
+  color: #d4dae6;
 }
 
 .message-meta time,

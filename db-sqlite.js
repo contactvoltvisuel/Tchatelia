@@ -33,6 +33,7 @@ export async function initDatabase() {
       nickname TEXT NOT NULL,
       text TEXT NOT NULL,
       author_id TEXT NOT NULL DEFAULT '',
+      author_gender TEXT NOT NULL DEFAULT 'other',
       reply_to_id TEXT NOT NULL DEFAULT '',
       reply_to_nickname TEXT NOT NULL DEFAULT '',
       reply_to_text TEXT NOT NULL DEFAULT '',
@@ -60,6 +61,7 @@ export async function initDatabase() {
       password_hash TEXT NOT NULL,
       salt TEXT NOT NULL,
       role TEXT NOT NULL,
+      gender TEXT NOT NULL DEFAULT 'other',
       active INTEGER NOT NULL DEFAULT 1,
       bio TEXT NOT NULL DEFAULT '',
       avatar_url TEXT NOT NULL DEFAULT '',
@@ -244,12 +246,19 @@ export async function initDatabase() {
     if (!String(error.message).includes("duplicate column")) throw error;
   }
 
+  try {
+    db.exec("ALTER TABLE accounts ADD COLUMN gender TEXT NOT NULL DEFAULT 'other'");
+  } catch (error) {
+    if (!String(error.message).includes("duplicate column")) throw error;
+  }
+
   db.exec(
     "CREATE UNIQUE INDEX IF NOT EXISTS accounts_email_unique_idx ON accounts(email) WHERE email <> ''"
   );
 
   const messageMigrations = [
     "ALTER TABLE messages ADD COLUMN author_id TEXT NOT NULL DEFAULT ''",
+    "ALTER TABLE messages ADD COLUMN author_gender TEXT NOT NULL DEFAULT 'other'",
     "ALTER TABLE messages ADD COLUMN reply_to_id TEXT NOT NULL DEFAULT ''",
     "ALTER TABLE messages ADD COLUMN reply_to_nickname TEXT NOT NULL DEFAULT ''",
     "ALTER TABLE messages ADD COLUMN reply_to_text TEXT NOT NULL DEFAULT ''",
@@ -291,7 +300,8 @@ export async function getRooms() {
 export async function getAccountByNickname(nickname) {
   return db
     .prepare(`
-      SELECT nickname, display_name AS displayName, password_hash AS passwordHash, salt, role, active,
+      SELECT nickname, display_name AS displayName, password_hash AS passwordHash, salt, role,
+        gender, active,
         bio, avatar_url AS avatarUrl,
         private_messages_enabled AS privateMessagesEnabled, email,
         email_verified AS emailVerified,
@@ -305,7 +315,8 @@ export async function getAccountByNickname(nickname) {
 export async function getAccountByEmail(email) {
   return db
     .prepare(`
-      SELECT nickname, display_name AS displayName, password_hash AS passwordHash, salt, role, active,
+      SELECT nickname, display_name AS displayName, password_hash AS passwordHash, salt, role,
+        gender, active,
         bio, avatar_url AS avatarUrl,
         private_messages_enabled AS privateMessagesEnabled, email,
         email_verified AS emailVerified,
@@ -319,7 +330,7 @@ export async function getAccountByEmail(email) {
 export async function listAccounts() {
   return db
     .prepare(`
-      SELECT nickname, display_name AS displayName, role, active,
+      SELECT nickname, display_name AS displayName, role, gender, active,
         private_messages_enabled AS privateMessagesEnabled,
         created_at AS createdAt
       FROM accounts
@@ -498,6 +509,7 @@ export async function getMessageById(id) {
   return db
     .prepare(`
       SELECT id, room, type, nickname, text, author_id AS authorId,
+        author_gender AS gender,
         reply_to_id AS replyToId, reply_to_nickname AS replyToNickname,
         reply_to_text AS replyToText, reply_to_deleted AS replyToDeleted,
         edited_at AS editedAt, deleted_at AS deletedAt, deleted_by AS deletedBy,
@@ -655,16 +667,17 @@ export async function updateContactMessageStatus(id, status, handledBy) {
 export async function createAccount(account) {
   db.prepare(`
     INSERT INTO accounts (
-      nickname, display_name, password_hash, salt, role, active, email,
+      nickname, display_name, password_hash, salt, role, gender, active, email,
       email_verified, created_at
     )
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
     account.nickname,
     account.displayName,
     account.passwordHash,
     account.salt,
     account.role,
+    account.gender || "other",
     1,
     account.email || "",
     account.emailVerified ? 1 : 0,
@@ -942,6 +955,7 @@ export async function getRoomHistory(room, limit = 80) {
   return db
     .prepare(`
       SELECT id, type, nickname, text, author_id AS authorId,
+        author_gender AS gender,
         reply_to_id AS replyToId, reply_to_nickname AS replyToNickname,
         reply_to_text AS replyToText, reply_to_deleted AS replyToDeleted,
         edited_at AS editedAt, deleted_at AS deletedAt, deleted_by AS deletedBy,
@@ -963,11 +977,11 @@ export async function getRoomHistory(room, limit = 80) {
 export async function saveMessage(room, message) {
   db.prepare(`
     INSERT OR REPLACE INTO messages (
-      id, room, type, nickname, text, author_id,
+      id, room, type, nickname, text, author_id, author_gender,
       reply_to_id, reply_to_nickname, reply_to_text, reply_to_deleted,
       edited_at, deleted_at, deleted_by, reaction_data, pinned_at, pinned_by, created_at
     )
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
     message.id,
     room,
@@ -975,6 +989,7 @@ export async function saveMessage(room, message) {
     message.nickname,
     message.text,
     message.authorId || "",
+    message.gender || "other",
     message.replyToId || "",
     message.replyToNickname || "",
     message.replyToText || "",

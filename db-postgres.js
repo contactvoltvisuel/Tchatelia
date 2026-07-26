@@ -29,6 +29,7 @@ export async function initDatabase() {
       nickname TEXT NOT NULL,
       text TEXT NOT NULL,
       author_id TEXT NOT NULL DEFAULT '',
+      author_gender TEXT NOT NULL DEFAULT 'other',
       reply_to_id TEXT NOT NULL DEFAULT '',
       reply_to_nickname TEXT NOT NULL DEFAULT '',
       reply_to_text TEXT NOT NULL DEFAULT '',
@@ -55,6 +56,7 @@ export async function initDatabase() {
       password_hash TEXT NOT NULL,
       salt TEXT NOT NULL,
       role TEXT NOT NULL,
+      gender TEXT NOT NULL DEFAULT 'other',
       active BOOLEAN NOT NULL DEFAULT TRUE,
       bio TEXT NOT NULL DEFAULT '',
       avatar_url TEXT NOT NULL DEFAULT '',
@@ -201,11 +203,17 @@ export async function initDatabase() {
   await pool.query(
     "ALTER TABLE accounts ADD COLUMN IF NOT EXISTS email_verified BOOLEAN NOT NULL DEFAULT TRUE"
   );
+  await pool.query(
+    "ALTER TABLE accounts ADD COLUMN IF NOT EXISTS gender TEXT NOT NULL DEFAULT 'other'"
+  );
   await pool.query("ALTER TABLE accounts ALTER COLUMN email_verified SET DEFAULT FALSE");
   await pool.query(
     "CREATE UNIQUE INDEX IF NOT EXISTS accounts_email_unique_idx ON accounts(email) WHERE email <> ''"
   );
   await pool.query("ALTER TABLE messages ADD COLUMN IF NOT EXISTS author_id TEXT NOT NULL DEFAULT ''");
+  await pool.query(
+    "ALTER TABLE messages ADD COLUMN IF NOT EXISTS author_gender TEXT NOT NULL DEFAULT 'other'"
+  );
   await pool.query("ALTER TABLE messages ADD COLUMN IF NOT EXISTS reply_to_id TEXT NOT NULL DEFAULT ''");
   await pool.query(
     "ALTER TABLE messages ADD COLUMN IF NOT EXISTS reply_to_nickname TEXT NOT NULL DEFAULT ''"
@@ -249,7 +257,8 @@ export async function getRooms() {
 export async function getAccountByNickname(nickname) {
   const result = await pool.query(
     `
-      SELECT nickname, display_name AS "displayName", password_hash AS "passwordHash", salt, role, active,
+      SELECT nickname, display_name AS "displayName", password_hash AS "passwordHash", salt, role,
+        gender, active,
         bio, avatar_url AS "avatarUrl",
         private_messages_enabled AS "privateMessagesEnabled", email,
         email_verified AS "emailVerified",
@@ -265,7 +274,8 @@ export async function getAccountByNickname(nickname) {
 export async function getAccountByEmail(email) {
   const result = await pool.query(
     `
-      SELECT nickname, display_name AS "displayName", password_hash AS "passwordHash", salt, role, active,
+      SELECT nickname, display_name AS "displayName", password_hash AS "passwordHash", salt, role,
+        gender, active,
         bio, avatar_url AS "avatarUrl",
         private_messages_enabled AS "privateMessagesEnabled", email,
         email_verified AS "emailVerified",
@@ -280,7 +290,7 @@ export async function getAccountByEmail(email) {
 
 export async function listAccounts() {
   const result = await pool.query(`
-    SELECT nickname, display_name AS "displayName", role, active,
+    SELECT nickname, display_name AS "displayName", role, gender, active,
       private_messages_enabled AS "privateMessagesEnabled",
       created_at AS "createdAt"
     FROM accounts
@@ -479,6 +489,7 @@ export async function getMessageById(id) {
   const result = await pool.query(
     `
       SELECT id, room, type, nickname, text, author_id AS "authorId",
+        author_gender AS gender,
         reply_to_id AS "replyToId", reply_to_nickname AS "replyToNickname",
         reply_to_text AS "replyToText", reply_to_deleted AS "replyToDeleted",
         edited_at AS "editedAt", deleted_at AS "deletedAt", deleted_by AS "deletedBy",
@@ -661,10 +672,10 @@ export async function createAccount(account) {
   await pool.query(
     `
       INSERT INTO accounts (
-        nickname, display_name, password_hash, salt, role, active, email,
+        nickname, display_name, password_hash, salt, role, gender, active, email,
         email_verified, created_at
       )
-      VALUES ($1, $2, $3, $4, $5, TRUE, $6, $7, $8)
+      VALUES ($1, $2, $3, $4, $5, $6, TRUE, $7, $8, $9)
     `,
     [
       account.nickname,
@@ -672,6 +683,7 @@ export async function createAccount(account) {
       account.passwordHash,
       account.salt,
       account.role,
+      account.gender || "other",
       account.email || "",
       Boolean(account.emailVerified),
       Date.now(),
@@ -996,6 +1008,7 @@ export async function getRoomHistory(room, limit = 80) {
   const result = await pool.query(
     `
       SELECT id, type, nickname, text, author_id AS "authorId",
+        author_gender AS gender,
         reply_to_id AS "replyToId", reply_to_nickname AS "replyToNickname",
         reply_to_text AS "replyToText", reply_to_deleted AS "replyToDeleted",
         edited_at AS "editedAt", deleted_at AS "deletedAt", deleted_by AS "deletedBy",
@@ -1021,13 +1034,13 @@ export async function saveMessage(room, message) {
   await pool.query(
     `
       INSERT INTO messages (
-        id, room, type, nickname, text, author_id,
+        id, room, type, nickname, text, author_id, author_gender,
         reply_to_id, reply_to_nickname, reply_to_text, reply_to_deleted,
         edited_at, deleted_at, deleted_by, reaction_data, pinned_at, pinned_by, created_at
       )
       VALUES (
         $1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
-        $11, $12, $13, $14, $15, $16, $17
+        $11, $12, $13, $14, $15, $16, $17, $18
       )
       ON CONFLICT (id) DO UPDATE SET
         room = EXCLUDED.room,
@@ -1035,6 +1048,7 @@ export async function saveMessage(room, message) {
         nickname = EXCLUDED.nickname,
         text = EXCLUDED.text,
         author_id = EXCLUDED.author_id,
+        author_gender = EXCLUDED.author_gender,
         reply_to_id = EXCLUDED.reply_to_id,
         reply_to_nickname = EXCLUDED.reply_to_nickname,
         reply_to_text = EXCLUDED.reply_to_text,
@@ -1054,6 +1068,7 @@ export async function saveMessage(room, message) {
       message.nickname,
       message.text,
       message.authorId || "",
+      message.gender || "other",
       message.replyToId || "",
       message.replyToNickname || "",
       message.replyToText || "",

@@ -87,8 +87,10 @@ import {
 import {
   getNewPasswordError,
   isAllowedOrigin,
+  isIpAddressAllowed,
   MAX_PASSWORD_LENGTH,
   MIN_PASSWORD_LENGTH,
+  parseAllowedIpAddresses,
 } from "./security.js";
 
 const scrypt = promisify(scryptCallback);
@@ -109,6 +111,8 @@ const rootIndex = join(__dirname, "index.html");
 const PORT = process.env.PORT || 3000;
 const MAX_HISTORY = 80;
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || "tchatelia-admin";
+const ADMIN_ALLOWED_IPS = parseAllowedIpAddresses(process.env.ADMIN_ALLOWED_IPS);
+const ADMIN_IP_PROTECTION_ENABLED = ADMIN_ALLOWED_IPS.length > 0;
 const SPAM_WINDOW_MS = 10_000;
 const SPAM_MAX_MESSAGES = 5;
 const SPAM_COOLDOWN_MS = 15_000;
@@ -121,6 +125,7 @@ const MESSAGE_REACTIONS = new Map([
   ["surprised", "\u{1F62E}"],
 ]);
 const PRESENCE_STATUSES = new Set(["online", "away", "busy"]);
+const ACCOUNT_GENDERS = new Set(["man", "woman", "other"]);
 const PUBLIC_PROTECTION_ENABLED = process.env.PUBLIC_PROTECTION !== "false";
 const TURNSTILE_SITE_KEY = String(process.env.TURNSTILE_SITE_KEY || "").trim();
 const TURNSTILE_SECRET_KEY = String(process.env.TURNSTILE_SECRET_KEY || "").trim();
@@ -272,6 +277,8 @@ app.get("/api/public-config", (request, response) => {
     emailVerificationEnabled: EMAIL_VERIFICATION_ENABLED,
     minPasswordLength: MIN_PASSWORD_LENGTH,
     maxPasswordLength: MAX_PASSWORD_LENGTH,
+    adminAccessAllowed: isAdminAccessAllowed(request),
+    adminIpProtectionEnabled: ADMIN_IP_PROTECTION_ENABLED,
     rooms: getRoomList(),
   });
 });
@@ -283,6 +290,20 @@ app.get("/api/session", async (request, response) => {
     if (!sessionState) {
       clearSessionCookie(request, response);
       response.status(401).json({ ok: false });
+      return;
+    }
+    if (sessionState.account.role === "admin" && !isAdminAccessAllowed(request)) {
+      const identity = getSecurityIdentity(request);
+      await recordSecurityEvent(
+        "admin_ip_denied",
+        identity.hash,
+        `Session admin refusee pour ${sessionState.account.nickname}`
+      );
+      clearSessionCookie(request, response);
+      response.status(403).json({
+        ok: false,
+        error: "Cette session administrateur n'est pas autorisee depuis cette connexion.",
+      });
       return;
     }
     response.json({
@@ -356,6 +377,19 @@ app.post("/api/session", async (request, response) => {
 
     if (!account.active) {
       response.status(403).json({ ok: false, error: "Ce compte est desactive." });
+      return;
+    }
+
+    if (account.role === "admin" && !isAdminAccessAllowed(request)) {
+      await recordSecurityEvent(
+        "admin_ip_denied",
+        identity.hash,
+        `Connexion au compte admin refusee pour ${account.nickname}`
+      );
+      response.status(403).json({
+        ok: false,
+        error: "Ce compte administrateur est accessible uniquement depuis ton reseau reconnu.",
+      });
       return;
     }
 
@@ -717,6 +751,7 @@ io.on("connection", (socket) => {
       adminPassword,
       accountPassword,
       accountEmail,
+      accountGender,
       authMode,
       legalAccepted,
       turnstileToken,
@@ -727,13 +762,19 @@ io.on("connection", (socket) => {
     let normalizedNickname = normalizeName(cleanNickname);
     const cleanRoom = rooms.has(room) ? room : "accueil";
     const wantsAdmin = Boolean(String(adminPassword || "").trim());
-    const isAdmin = secureSecretEqual(adminPassword, ADMIN_PASSWORD);
     const cleanAuthMode = ["guest", "login", "register", "session"].includes(authMode)
       ? authMode
       : "guest";
     const cleanAccountPassword = String(accountPassword || "");
     const cleanAccountEmail = normalizeEmail(accountEmail);
     const securityIdentity = getSecurityIdentity(socket);
+    const adminIpAllowed = isIpAddressAllowed(
+      securityIdentity.rawIp,
+      ADMIN_ALLOWED_IPS
+    );
+    const isAdmin =
+      adminIpAllowed && secureSecretEqual(adminPassword, ADMIN_PASSWORD);
+    const cleanGender = normalizeGender(accountGender);
     let registeredNow = false;
     let sessionAccount = null;
 
@@ -803,6 +844,19 @@ io.on("connection", (socket) => {
       return;
     }
 
+    if (wantsAdmin && !adminIpAllowed) {
+      await recordSecurityEvent(
+        "admin_ip_denied",
+        securityIdentity.hash,
+        `Acces admin refuse pour ${cleanNickname}`
+      );
+      callback?.({
+        ok: false,
+        error: "L'acces administrateur n'est pas autorise depuis cette connexion.",
+      });
+      return;
+    }
+
     if (wantsAdmin && !isAdmin) {
       await registerAuthFailure(
         securityIdentity.hash,
@@ -861,6 +915,7 @@ io.on("connection", (socket) => {
         passwordHash: passwordRecord.passwordHash,
         salt: passwordRecord.salt,
         role: isAdmin ? "admin" : "user",
+        gender: cleanGender,
         email: cleanAccountEmail,
         emailVerified: !EMAIL_VERIFICATION_ENABLED,
       });
@@ -907,6 +962,19 @@ io.on("connection", (socket) => {
           return;
         }
       }
+
+      if (account.role === "admin" && !adminIpAllowed) {
+        await recordSecurityEvent(
+          "admin_ip_denied",
+          securityIdentity.hash,
+          `Connexion au compte admin refusee pour ${cleanNickname}`
+        );
+        callback?.({
+          ok: false,
+          error: "Ce compte administrateur est accessible uniquement depuis ton reseau reconnu.",
+        });
+        return;
+      }
     }
 
     if (!account && (cleanAuthMode === "login" || cleanAuthMode === "session")) {
@@ -952,6 +1020,7 @@ io.on("connection", (socket) => {
     registerSuccessfulAccess(securityIdentity.hash, cleanAuthMode);
     const role = account?.role || (isAdmin ? "admin" : "user");
     const displayName = account?.displayName || cleanNickname;
+    const gender = normalizeGender(account?.gender || cleanGender);
     const [favoriteMessageIds, blockedUsers] =
       account || cleanAuthMode === "register"
         ? await Promise.all([
@@ -975,6 +1044,7 @@ io.on("connection", (socket) => {
       nickname: displayName,
       room: cleanRoom,
       role,
+      gender,
       account: Boolean(account || cleanAuthMode === "register"),
       accountNickname: account || cleanAuthMode === "register" ? accountNickname : null,
       bio: account?.bio || "",
@@ -987,6 +1057,7 @@ io.on("connection", (socket) => {
           ? `account:${accountNickname}`
           : `guest:${randomUUID()}`,
       securityIdentityHash: securityIdentity.hash,
+      adminIpAllowed,
       memberSince: account?.createdAt || Date.now(),
       messageTimes: [],
       lastMessage: "",
@@ -1026,6 +1097,7 @@ io.on("connection", (socket) => {
       nickname: displayName,
       room: cleanRoom,
       role,
+      gender,
       account: Boolean(account || cleanAuthMode === "register"),
       accountNickname: account || cleanAuthMode === "register" ? accountNickname : "",
       topic: rooms.get(cleanRoom).topic,
@@ -1113,7 +1185,9 @@ io.on("connection", (socket) => {
             ? "Commandes admin : /me texte, /clear, /kick pseudo, /ban pseudo, /unban pseudo"
             : user.role === "moderator"
               ? "Commandes moderation : /me texte, /clear, /kick pseudo, /ban pseudo, /unban pseudo"
-            : "Commandes : /me texte, /clear, /admin motdepasse",
+            : user.adminIpAllowed
+              ? "Commandes : /me texte, /clear, /admin motdepasse"
+              : "Commandes : /me texte, /clear",
         createdAt: Date.now(),
       });
       return;
@@ -1121,6 +1195,19 @@ io.on("connection", (socket) => {
 
     if (messageText.startsWith("/admin ")) {
       const password = messageText.slice(7).trim();
+
+      if (!user.adminIpAllowed) {
+        await recordSecurityEvent(
+          "admin_ip_denied",
+          user.securityIdentityHash,
+          `Commande admin refusee pour ${user.nickname}`
+        );
+        emitPrivateSystem(
+          socket,
+          "L'acces administrateur n'est pas autorise depuis cette connexion."
+        );
+        return;
+      }
 
       if (!secureSecretEqual(password, ADMIN_PASSWORD)) {
         socket.emit("message", {
@@ -1202,6 +1289,7 @@ io.on("connection", (socket) => {
         nickname: user.nickname,
         text: messageText.slice(4),
         authorId: user.messageAuthorId,
+        gender: user.gender,
         ...reply,
         createdAt: Date.now(),
       }, socket.id);
@@ -1214,6 +1302,7 @@ io.on("connection", (socket) => {
       nickname: user.nickname,
       text: messageText,
       authorId: user.messageAuthorId,
+      gender: user.gender,
       ...reply,
       createdAt: Date.now(),
     }, socket.id);
@@ -1900,6 +1989,18 @@ function normalizeName(value) {
   return String(value || "").trim().toLocaleLowerCase("fr-FR");
 }
 
+function normalizeGender(value) {
+  const gender = String(value || "").trim().toLocaleLowerCase("en-US");
+  return ACCOUNT_GENDERS.has(gender) ? gender : "other";
+}
+
+function isAdminAccessAllowed(source) {
+  return isIpAddressAllowed(
+    getSecurityIdentity(source).rawIp,
+    ADMIN_ALLOWED_IPS
+  );
+}
+
 function getSecurityIdentity(source) {
   const headers = source.handshake?.headers || source.headers || {};
   const forwardedAddresses = String(
@@ -2215,6 +2316,7 @@ async function sendProfile(socket, viewer, rawNickname) {
       accountNickname: account.nickname,
       nickname: account.displayName,
       role: account.role,
+      gender: normalizeGender(account.gender),
       bio: account.bio,
       avatarUrl: account.avatarUrl,
       createdAt: account.createdAt,
@@ -2237,6 +2339,7 @@ async function sendProfile(socket, viewer, rawNickname) {
     accountNickname: "",
     nickname: target.nickname,
     role: target.role,
+    gender: normalizeGender(target.gender),
     bio: "",
     avatarUrl: "",
     createdAt: target.memberSince,
@@ -2635,6 +2738,7 @@ async function sendPrivateConversation(socket, accountNickname, targetAccount) {
       accountNickname: targetAccount.nickname,
       nickname: targetAccount.displayName,
       role: targetAccount.role,
+      gender: normalizeGender(targetAccount.gender),
       privateMessagesEnabled: Boolean(targetAccount.privateMessagesEnabled),
       avatarUrl: targetAccount.avatarUrl
         ? `/avatar/${encodeURIComponent(targetAccount.nickname)}`
@@ -2701,6 +2805,7 @@ async function buildPrivateState(accountNickname) {
           ...conversation,
           nickname: account.displayName,
           role: account.role,
+          gender: normalizeGender(account.gender),
           avatarUrl: account.avatarUrl
             ? `/avatar/${encodeURIComponent(account.nickname)}`
             : "",
@@ -3434,6 +3539,7 @@ function serializeMessageForUser(message, user, room) {
     id: message.id,
     type: message.type,
     nickname: message.nickname,
+    gender: normalizeGender(message.gender),
     text: deletedAt ? "" : message.text,
     authorAccountNickname,
     replyToId: hideReply ? "" : message.replyToId || "",
@@ -3600,6 +3706,7 @@ function publishUsers(room) {
     .map((user) => ({
       nickname: user.nickname,
       role: user.role,
+      gender: normalizeGender(user.gender),
       account: user.account,
       presenceStatus: PRESENCE_STATUSES.has(user.presenceStatus)
         ? user.presenceStatus

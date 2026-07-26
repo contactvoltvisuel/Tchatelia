@@ -10,7 +10,7 @@
     />
     <meta name="theme-color" content="#0B1020" />
     <link rel="icon" href="data:," />
-    <link rel="stylesheet" href="/styles.css?v=20260726-1" />
+    <link rel="stylesheet" href="/styles.css?v=20260726-2" />
   </head>
   <body>
     <main class="shell">
@@ -137,6 +137,28 @@
               <small>Utilisee uniquement pour recuperer ton compte.</small>
             </div>
 
+            <fieldset class="account-gender-field hidden" id="accountGenderField">
+              <legend>Je me presente comme</legend>
+              <div class="gender-options">
+                <label>
+                  <input type="radio" name="accountGender" value="man" />
+                  <span class="gender-swatch gender-swatch-man"></span>
+                  Homme
+                </label>
+                <label>
+                  <input type="radio" name="accountGender" value="woman" />
+                  <span class="gender-swatch gender-swatch-woman"></span>
+                  Femme
+                </label>
+                <label>
+                  <input type="radio" name="accountGender" value="other" checked />
+                  <span class="gender-swatch gender-swatch-other"></span>
+                  Autre
+                </label>
+              </div>
+              <small>Ce choix determine uniquement la couleur publique du pseudo.</small>
+            </fieldset>
+
             <button class="forgot-password-button hidden" id="forgotPasswordButton" type="button">
               Mot de passe oublie ?
             </button>
@@ -149,15 +171,17 @@
               <option value="rencontres">#rencontres</option>
             </select>
 
-            <label for="adminPassword">Mot de passe admin</label>
-            <input
-              id="adminPassword"
-              name="adminPassword"
-              type="password"
-              maxlength="256"
-              autocomplete="current-password"
-              placeholder="Optionnel"
-            />
+            <div class="admin-access-field" id="adminAccessField">
+              <label for="adminPassword">Mot de passe admin</label>
+              <input
+                id="adminPassword"
+                name="adminPassword"
+                type="password"
+                maxlength="256"
+                autocomplete="current-password"
+                placeholder="Optionnel"
+              />
+            </div>
 
             <div class="login-security hidden" id="loginSecurity">
               <p>Verification de securite</p>
@@ -909,6 +933,6 @@
     </dialog>
 
     <script src="/socket.io/socket.io.js"></script>
-    <script src="/app.js?v=20260725-2"></script>
+    <script src="/app.js?v=20260726-2"></script>
   </body>
 </html>
