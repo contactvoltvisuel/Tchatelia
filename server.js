@@ -85,6 +85,7 @@ import {
   shouldHideMessageFromUser,
 } from "./blocking.js";
 import {
+  getForwardedClientIp,
   getNewPasswordError,
   isAllowedOrigin,
   isIpAddressAllowed,
@@ -2003,13 +2004,7 @@ function isAdminAccessAllowed(source) {
 
 function getSecurityIdentity(source) {
   const headers = source.handshake?.headers || source.headers || {};
-  const forwardedAddresses = String(
-    headers["x-forwarded-for"] || ""
-  )
-    .split(",")
-    .map((address) => address.trim())
-    .filter(Boolean);
-  const forwardedFor = forwardedAddresses.at(-1) || "";
+  const forwardedFor = getForwardedClientIp(headers["x-forwarded-for"]);
   const rawIp =
     forwardedFor ||
     source.handshake?.address ||

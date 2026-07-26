@@ -96,6 +96,15 @@ export function parseAllowedIpAddresses(value) {
   ];
 }
 
+export function getForwardedClientIp(value) {
+  return (
+    String(value || "")
+      .split(",")
+      .map(normalizeIpAddress)
+      .find(Boolean) || ""
+  );
+}
+
 export function isIpAddressAllowed(value, allowedAddresses) {
   const allowed = Array.isArray(allowedAddresses)
     ? allowedAddresses
