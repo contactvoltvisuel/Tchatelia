@@ -4,126 +4,185 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Tchatelia</title>
+    <meta
+      name="description"
+      content="Tchatelia, le tchat francophone gratuit pour discuter, rencontrer et partager."
+    />
+    <meta name="theme-color" content="#0B1020" />
     <link rel="icon" href="data:," />
-    <link rel="stylesheet" href="/styles.css?v=20260725-2" />
+    <link rel="stylesheet" href="/styles.css?v=20260726-1" />
   </head>
   <body>
     <main class="shell">
       <section class="login-panel" id="loginPanel">
         <div class="login-brand-pane">
-          <div class="brand-lockup">
-            <span class="brand-mark" aria-hidden="true">T</span>
-            <span>Tchatelia</span>
+          <div class="hero-topline">
+            <div class="brand-lockup">
+              <span class="brand-mark" aria-hidden="true">t</span>
+              <span class="brand-wordmark" aria-label="Tchatelia"
+                >tchatel<span class="brand-letter-i">i</span>a</span
+              >
+            </div>
+            <div class="login-presence" aria-label="Service disponible">
+              <span class="status-dot"></span>
+              <span>Le tchat est ouvert</span>
+            </div>
           </div>
-          <div>
-            <p class="eyebrow">Discussion francophone</p>
-            <h1>Retrouvons-nous.</h1>
-            <p class="intro">Des salons simples pour discuter, partager et faire connaissance.</p>
+
+          <div class="hero-content">
+            <p class="eyebrow">Tchat francophone gratuit</p>
+            <h1>tchatelia</h1>
+            <h2>Discutez. Rencontrez. Partagez.</h2>
+            <p class="intro">
+              Rejoignez des discussions vivantes, faites de nouvelles rencontres et retrouvez
+              votre communaute dans un espace simple et convivial.
+            </p>
+            <div class="hero-actions">
+              <button class="hero-primary-button" id="heroEnterButton" type="button">
+                Entrer dans le tchat
+              </button>
+              <button class="hero-secondary-button" id="heroRegisterButton" type="button">
+                Creer mon profil
+              </button>
+            </div>
           </div>
-          <div class="login-presence" aria-label="Service disponible">
-            <span class="status-dot"></span>
-            <span>Le tchat est ouvert</span>
-          </div>
+
+          <section class="popular-rooms" aria-labelledby="popularRoomsTitle">
+            <div class="popular-rooms-heading">
+              <div>
+                <p class="eyebrow">En ce moment</p>
+                <h2 id="popularRoomsTitle">Salons populaires</h2>
+              </div>
+              <span>Communaute ouverte</span>
+            </div>
+            <div class="popular-room-list" id="popularRoomList">
+              <button type="button" data-popular-room="accueil">
+                <span>#</span>
+                <strong>accueil</strong>
+                <small><b data-room-count="accueil">0</b> en ligne</small>
+              </button>
+              <button type="button" data-popular-room="rencontres">
+                <span>#</span>
+                <strong>rencontres</strong>
+                <small><b data-room-count="rencontres">0</b> en ligne</small>
+              </button>
+              <button type="button" data-popular-room="musique">
+                <span>#</span>
+                <strong>musique</strong>
+                <small><b data-room-count="musique">0</b> en ligne</small>
+              </button>
+            </div>
+          </section>
         </div>
 
-        <form class="login-form" id="loginForm">
-          <div class="login-form-heading">
-            <p class="eyebrow">Bienvenue</p>
-            <h2>Entrer dans Tchatelia</h2>
-          </div>
-          <div class="auth-mode">
-            <label>
-              <input type="radio" name="authMode" value="guest" checked />
-              Invite
-            </label>
-            <label>
-              <input type="radio" name="authMode" value="login" />
-              Connexion
-            </label>
-            <label>
-              <input type="radio" name="authMode" value="register" />
-              Inscription
-            </label>
+        <div class="login-form-pane">
+          <div class="login-form-brand">
+            <span class="brand-mark small" aria-hidden="true">t</span>
+            <span class="brand-wordmark" aria-label="Tchatelia"
+              >tchatel<span class="brand-letter-i">i</span>a</span
+            >
           </div>
 
-          <label for="nickname">Pseudo</label>
-          <input
-            id="nickname"
-            name="nickname"
-            maxlength="18"
-            autocomplete="nickname"
-            placeholder="TonPseudo"
-            required
-          />
+          <form class="login-form" id="loginForm">
+            <div class="login-form-heading">
+              <p class="eyebrow">Bienvenue</p>
+              <h2>Rejoindre la conversation</h2>
+              <p>Entrez directement ou connectez-vous a votre profil.</p>
+            </div>
+            <div class="auth-mode">
+              <label>
+                <input type="radio" name="authMode" value="guest" checked />
+                Invite
+              </label>
+              <label>
+                <input type="radio" name="authMode" value="login" />
+                Connexion
+              </label>
+              <label>
+                <input type="radio" name="authMode" value="register" />
+                Inscription
+              </label>
+            </div>
 
-          <label for="accountPassword">Mot de passe du compte</label>
-          <input
-            id="accountPassword"
-            name="accountPassword"
-            type="password"
-            maxlength="128"
-            autocomplete="current-password"
-            placeholder="Connexion ou inscription"
-          />
-
-          <div class="account-email-field hidden" id="accountEmailField">
-            <label for="accountEmail">Adresse e-mail</label>
+            <label for="nickname">Pseudo</label>
             <input
-              id="accountEmail"
-              name="accountEmail"
-              type="email"
-              maxlength="254"
-              autocomplete="email"
-              placeholder="ton@email.fr"
+              id="nickname"
+              name="nickname"
+              maxlength="18"
+              autocomplete="nickname"
+              placeholder="TonPseudo"
+              required
             />
-            <small>Utilisee uniquement pour recuperer ton compte.</small>
-          </div>
 
-          <button class="forgot-password-button hidden" id="forgotPasswordButton" type="button">
-            Mot de passe oublie ?
-          </button>
+            <label for="accountPassword">Mot de passe du compte</label>
+            <input
+              id="accountPassword"
+              name="accountPassword"
+              type="password"
+              maxlength="128"
+              autocomplete="current-password"
+              placeholder="Connexion ou inscription"
+            />
 
-          <label for="room">Salon</label>
-          <select id="room" name="room">
-            <option value="accueil">#accueil</option>
-            <option value="aide">#aide</option>
-            <option value="musique">#musique</option>
-            <option value="rencontres">#rencontres</option>
-          </select>
+            <div class="account-email-field hidden" id="accountEmailField">
+              <label for="accountEmail">Adresse e-mail</label>
+              <input
+                id="accountEmail"
+                name="accountEmail"
+                type="email"
+                maxlength="254"
+                autocomplete="email"
+                placeholder="ton@email.fr"
+              />
+              <small>Utilisee uniquement pour recuperer ton compte.</small>
+            </div>
 
-          <label for="adminPassword">Mot de passe admin</label>
-          <input
-            id="adminPassword"
-            name="adminPassword"
-            type="password"
-            maxlength="256"
-            autocomplete="current-password"
-            placeholder="Optionnel"
-          />
+            <button class="forgot-password-button hidden" id="forgotPasswordButton" type="button">
+              Mot de passe oublie ?
+            </button>
 
-          <div class="login-security hidden" id="loginSecurity">
-            <p>Verification de securite</p>
-            <div id="turnstileWidget"></div>
-          </div>
+            <label for="room">Salon</label>
+            <select id="room" name="room">
+              <option value="accueil">#accueil</option>
+              <option value="aide">#aide</option>
+              <option value="musique">#musique</option>
+              <option value="rencontres">#rencontres</option>
+            </select>
 
-          <label class="access-consent">
-            <input name="legalAccepted" type="checkbox" required />
-            <span>
-              J'ai au moins 15 ans et j'accepte le
-              <a href="/reglement.html" target="_blank">reglement</a>, les
-              <a href="/conditions.html" target="_blank">conditions d'utilisation</a> et la
-              <a href="/confidentialite.html" target="_blank">politique de confidentialite</a>.
-            </span>
-          </label>
+            <label for="adminPassword">Mot de passe admin</label>
+            <input
+              id="adminPassword"
+              name="adminPassword"
+              type="password"
+              maxlength="256"
+              autocomplete="current-password"
+              placeholder="Optionnel"
+            />
 
-          <button type="submit">Entrer dans le chat</button>
-          <nav class="login-legal-links" aria-label="Informations legales">
-            <a href="/reglement.html">Reglement</a>
-            <a href="/conditions.html">Conditions</a>
-            <a href="/confidentialite.html">Confidentialite</a>
-            <a href="/contact.html">Contact</a>
-          </nav>
-        </form>
+            <div class="login-security hidden" id="loginSecurity">
+              <p>Verification de securite</p>
+              <div id="turnstileWidget"></div>
+            </div>
+
+            <label class="access-consent">
+              <input name="legalAccepted" type="checkbox" required />
+              <span>
+                J'ai au moins 15 ans et j'accepte le
+                <a href="/reglement.html" target="_blank">reglement</a>, les
+                <a href="/conditions.html" target="_blank">conditions d'utilisation</a> et la
+                <a href="/confidentialite.html" target="_blank">politique de confidentialite</a>.
+              </span>
+            </label>
+
+            <button type="submit">Entrer dans le tchat</button>
+            <nav class="login-legal-links" aria-label="Informations legales">
+              <a href="/reglement.html">Reglement</a>
+              <a href="/conditions.html">Conditions</a>
+              <a href="/confidentialite.html">Confidentialite</a>
+              <a href="/contact.html">Contact</a>
+            </nav>
+          </form>
+        </div>
       </section>
 
       <section class="chat-panel hidden" id="chatPanel" aria-label="Chat">
@@ -132,10 +191,12 @@
         <aside class="sidebar" id="roomSidebar">
           <div class="sidebar-header">
             <div class="brand">
-              <span class="brand-mark small" aria-hidden="true">T</span>
+              <span class="brand-mark small" aria-hidden="true">t</span>
               <div>
-                <strong>Tchatelia</strong>
-                <small>En direct</small>
+                <strong class="brand-wordmark" aria-label="Tchatelia"
+                  >tchatel<span class="brand-letter-i">i</span>a</strong
+                >
+                <small>Communaute en direct</small>
               </div>
             </div>
             <button
@@ -152,7 +213,15 @@
           <div class="sidebar-section">
             <div class="section-heading">
               <h2>Salons</h2>
-              <span class="section-status" aria-hidden="true"></span>
+              <button
+                class="icon-button hidden"
+                id="sidebarCreateRoomButton"
+                type="button"
+                aria-label="Creer un salon"
+                title="Creer un salon"
+              >
+                +
+              </button>
             </div>
             <div class="room-list" id="roomList"></div>
           </div>
@@ -174,15 +243,6 @@
                 title="Mon profil"
               >
                 &#9786;
-              </button>
-              <button
-                class="icon-button hidden"
-                id="accountSettingsButton"
-                type="button"
-                aria-label="Ouvrir les parametres du compte"
-                title="Parametres du compte"
-              >
-                &#9881;
               </button>
             </div>
           </div>
@@ -237,6 +297,15 @@
               <button class="ghost-button hidden" id="myProfileButton" type="button">
                 <span aria-hidden="true">&#9786;</span>
                 <span class="button-label">Profil</span>
+              </button>
+              <button
+                class="ghost-button hidden"
+                id="accountSettingsButton"
+                type="button"
+                title="Parametres du compte"
+              >
+                <span aria-hidden="true">&#9881;</span>
+                <span class="button-label">Parametres</span>
               </button>
               <button
                 class="ghost-button notification-toggle"

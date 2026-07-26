@@ -272,6 +272,7 @@ app.get("/api/public-config", (request, response) => {
     emailVerificationEnabled: EMAIL_VERIFICATION_ENABLED,
     minPasswordLength: MIN_PASSWORD_LENGTH,
     maxPasswordLength: MAX_PASSWORD_LENGTH,
+    rooms: getRoomList(),
   });
 });
 

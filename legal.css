@@ -1,14 +1,14 @@
 :root {
-  color-scheme: light;
-  --ink: #171616;
-  --muted: #66625d;
-  --line: #d9d3ca;
-  --paper: #f8f5ef;
-  --panel: #ffffff;
-  --accent: #0f766e;
-  --accent-dark: #115e59;
-  --warm: #c75c2d;
-  --soft: #eef6f4;
+  color-scheme: dark;
+  --ink: #f5f7ff;
+  --muted: #98a2b3;
+  --line: #2c3651;
+  --paper: #0b1020;
+  --panel: #151b2e;
+  --accent: #7c5cff;
+  --accent-dark: #9ecfff;
+  --warm: #ff8f70;
+  --soft: rgba(124, 92, 255, 0.14);
 }
 
 * {
@@ -19,7 +19,7 @@ body {
   margin: 0;
   color: var(--ink);
   background: var(--paper);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: Inter, "Segoe UI", Arial, Helvetica, sans-serif;
 }
 
 a {
@@ -35,7 +35,7 @@ textarea {
 
 .legal-header {
   border-bottom: 1px solid var(--line);
-  background: #fff;
+  background: #111729;
 }
 
 .legal-nav {
@@ -50,9 +50,10 @@ textarea {
 
 .legal-brand {
   color: var(--ink);
-  font-size: 20px;
-  font-weight: 700;
+  font-size: 21px;
+  font-weight: 850;
   text-decoration: none;
+  text-transform: lowercase;
 }
 
 .legal-links {
@@ -71,7 +72,7 @@ textarea {
 
 .legal-kicker {
   margin: 0 0 8px;
-  color: var(--accent-dark);
+  color: #a998ff;
   font-size: 13px;
   font-weight: 700;
   text-transform: uppercase;
@@ -79,7 +80,7 @@ textarea {
 
 .legal-main h1 {
   margin: 0 0 12px;
-  font-size: 48px;
+  font-size: 46px;
   line-height: 1;
 }
 
@@ -118,7 +119,8 @@ textarea {
   margin: 24px 0;
   padding: 16px;
   border-left: 4px solid var(--warm);
-  background: #fff5ef;
+  color: #d9dfeb;
+  background: rgba(255, 143, 112, 0.08);
   line-height: 1.55;
 }
 
@@ -148,7 +150,7 @@ textarea {
   padding: 24px;
   border: 1px solid var(--line);
   border-radius: 8px;
-  background: #fff;
+  background: var(--panel);
 }
 
 .contact-form label {
@@ -167,7 +169,7 @@ textarea {
   border-radius: 6px;
   padding: 10px 12px;
   color: var(--ink);
-  background: #fff;
+  background: #10172a;
 }
 
 .contact-form textarea {
@@ -178,8 +180,9 @@ textarea {
 .contact-form input:focus,
 .contact-form select:focus,
 .contact-form textarea:focus {
-  outline: 3px solid rgba(15, 118, 110, 0.16);
-  border-color: var(--accent);
+  outline: 0;
+  border-color: #35a7ff;
+  box-shadow: 0 0 0 3px rgba(53, 167, 255, 0.2);
 }
 
 .contact-accept {
@@ -195,12 +198,13 @@ textarea {
   width: 18px;
   min-height: 18px;
   margin-top: 2px;
+  accent-color: var(--accent);
 }
 
 .contact-form button {
   min-height: 46px;
   border: 0;
-  border-radius: 6px;
+  border-radius: 7px;
   padding: 0 16px;
   color: #fff;
   background: var(--accent);
@@ -209,7 +213,7 @@ textarea {
 }
 
 .contact-form button:hover {
-  background: var(--accent-dark);
+  background: #6b4fe2;
 }
 
 .contact-status {
@@ -219,11 +223,11 @@ textarea {
 }
 
 .contact-status.error {
-  color: #9f4320;
+  color: #ffad96;
 }
 
 .contact-status.success {
-  color: var(--accent-dark);
+  color: #39d98a;
 }
 
 .contact-honeypot {
@@ -235,7 +239,7 @@ textarea {
   padding: 26px 16px;
   border-top: 1px solid var(--line);
   color: var(--muted);
-  background: #fff;
+  background: #111729;
   font-size: 13px;
   text-align: center;
 }

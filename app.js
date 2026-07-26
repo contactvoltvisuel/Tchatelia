@@ -3,6 +3,12 @@ const socket = io();
 const loginPanel = document.querySelector("#loginPanel");
 const chatPanel = document.querySelector("#chatPanel");
 const loginForm = document.querySelector("#loginForm");
+const nicknameInput = document.querySelector("#nickname");
+const roomSelect = document.querySelector("#room");
+const heroEnterButton = document.querySelector("#heroEnterButton");
+const heroRegisterButton = document.querySelector("#heroRegisterButton");
+const popularRoomButtons = document.querySelectorAll("[data-popular-room]");
+const popularRoomCounts = document.querySelectorAll("[data-room-count]");
 const accountPasswordInput = document.querySelector("#accountPassword");
 const accountEmailField = document.querySelector("#accountEmailField");
 const accountEmailInput = document.querySelector("#accountEmail");
@@ -114,6 +120,7 @@ const currentUserRole = document.querySelector("#currentUserRole");
 const currentUserInitials = document.querySelector("#currentUserInitials");
 const sidebarProfileButton = document.querySelector("#sidebarProfileButton");
 const accountSettingsButton = document.querySelector("#accountSettingsButton");
+const sidebarCreateRoomButton = document.querySelector("#sidebarCreateRoomButton");
 const adminPanelButton = document.querySelector("#adminPanelButton");
 const adminDialog = document.querySelector("#adminDialog");
 const adminCloseButton = document.querySelector("#adminCloseButton");
@@ -232,6 +239,24 @@ initializeApplication();
 
 authModeInputs.forEach((input) => {
   input.addEventListener("change", updateAuthModeRequirements);
+});
+
+heroEnterButton.addEventListener("click", () => {
+  activateLoginMode("guest");
+});
+
+heroRegisterButton.addEventListener("click", () => {
+  activateLoginMode("register");
+});
+
+popularRoomButtons.forEach((button) => {
+  button.addEventListener("click", () => {
+    const room = String(button.dataset.popularRoom || "");
+    if (room && [...roomSelect.options].some((option) => option.value === room)) {
+      roomSelect.value = room;
+    }
+    activateLoginMode("guest");
+  });
 });
 
 loginForm.addEventListener("submit", async (event) => {
@@ -532,6 +557,13 @@ mobileOverlay.addEventListener("click", closeMobilePanels);
 adminPanelButton.addEventListener("click", () => {
   closeMobilePanels();
   if (!adminDialog.open) adminDialog.showModal();
+});
+
+sidebarCreateRoomButton.addEventListener("click", () => {
+  if (currentRole !== "admin") return;
+  closeMobilePanels();
+  if (!adminDialog.open) adminDialog.showModal();
+  window.setTimeout(() => adminRoomNameInput.focus(), 80);
 });
 
 adminCloseButton.addEventListener("click", () => {
@@ -1407,6 +1439,7 @@ function renderAdminPanel() {
   if (!canModerate) {
     adminPanel.classList.add("hidden");
     adminPanelButton.classList.add("hidden");
+    sidebarCreateRoomButton.classList.add("hidden");
     if (adminDialog.open) adminDialog.close();
     adminUserList.innerHTML = "";
     adminAccountList.innerHTML = "";
@@ -1419,6 +1452,7 @@ function renderAdminPanel() {
 
   adminPanel.classList.remove("hidden");
   adminPanelButton.classList.remove("hidden");
+  sidebarCreateRoomButton.classList.toggle("hidden", !canManage);
   adminUserList.innerHTML = "";
   adminRoomCreateForm.classList.toggle("hidden", !canManage);
   adminRoomTopicForm.classList.toggle("hidden", !canManage);
@@ -2315,6 +2349,30 @@ function updateAuthModeRequirements() {
         : "Optionnel";
 }
 
+function activateLoginMode(mode) {
+  const input = document.querySelector(`input[name="authMode"][value="${mode}"]`);
+  if (input) {
+    input.checked = true;
+    updateAuthModeRequirements();
+  }
+  loginForm.scrollIntoView({
+    behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches
+      ? "auto"
+      : "smooth",
+    block: "center",
+  });
+  window.setTimeout(() => nicknameInput.focus(), 220);
+}
+
+function updatePopularRoomCounts(rooms = []) {
+  const counts = new Map(
+    rooms.map((room) => [String(room.name || ""), Number(room.users) || 0])
+  );
+  popularRoomCounts.forEach((element) => {
+    element.textContent = String(counts.get(element.dataset.roomCount) || 0);
+  });
+}
+
 async function initializeApplication() {
   await initializePublicProtection();
   const query = new URLSearchParams(window.location.search);
@@ -2457,6 +2515,7 @@ async function initializePublicProtection() {
       Number(config.minPasswordLength) || minimumPasswordLength;
     maximumPasswordLength =
       Number(config.maxPasswordLength) || maximumPasswordLength;
+    updatePopularRoomCounts(Array.isArray(config.rooms) ? config.rooms : []);
     applyPasswordRequirements();
     updateAuthModeRequirements();
     if (!config.turnstileEnabled || !config.turnstileSiteKey) return;
@@ -2465,7 +2524,7 @@ async function initializePublicProtection() {
     await loadTurnstileScript();
     turnstileWidgetId = window.turnstile.render(turnstileWidget, {
       sitekey: config.turnstileSiteKey,
-      theme: "light",
+      theme: "dark",
       size: "flexible",
       callback: (token) => {
         turnstileToken = token;
