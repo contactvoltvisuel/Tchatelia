@@ -5482,6 +5482,54 @@ html[data-theme="light"] .notification {
   background: #ffffff;
 }
 
+/* Keep identity colors above the generic light and dark theme text colors. */
+html .message.gender-man .message-meta strong,
+html .profile-user-copy strong.gender-man,
+html .private-conversation-copy strong.gender-man,
+#currentUserName.gender-man,
+#profileNickname.gender-man,
+#privateNickname.gender-man {
+  color: var(--man-name);
+}
+
+html .message.gender-woman .message-meta strong,
+html .profile-user-copy strong.gender-woman,
+html .private-conversation-copy strong.gender-woman,
+#currentUserName.gender-woman,
+#profileNickname.gender-woman,
+#privateNickname.gender-woman {
+  color: var(--woman-name);
+}
+
+html .message.gender-other .message-meta strong,
+html .profile-user-copy strong.gender-other,
+html .private-conversation-copy strong.gender-other,
+#currentUserName.gender-other,
+#profileNickname.gender-other,
+#privateNickname.gender-other {
+  color: var(--neutral-name);
+}
+
+html .message.role-admin .message-meta strong,
+html .profile-user-copy strong.role-admin,
+html .private-conversation-copy strong.role-admin,
+#currentUserName.role-admin,
+#profileNickname.role-admin,
+#privateNickname.role-admin,
+.admin-user .role-admin {
+  color: var(--admin-name);
+}
+
+html .message.role-moderator .message-meta strong,
+html .profile-user-copy strong.role-moderator,
+html .private-conversation-copy strong.role-moderator,
+#currentUserName.role-moderator,
+#profileNickname.role-moderator,
+#privateNickname.role-moderator,
+.admin-user .role-moderator {
+  color: var(--moderator-name);
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
