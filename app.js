@@ -14,9 +14,20 @@ const heroRegisterButton = document.querySelector("#heroRegisterButton");
 const popularRoomButtons = document.querySelectorAll("[data-popular-room]");
 const popularRoomCounts = document.querySelectorAll("[data-room-count]");
 const accountPasswordInput = document.querySelector("#accountPassword");
+const accountPasswordLabel = document.querySelector("#accountPasswordLabel");
+const accountPasswordHelp = document.querySelector("#accountPasswordHelp");
+const accountPasswordConfirmField = document.querySelector(
+  "#accountPasswordConfirmField"
+);
+const accountPasswordConfirmInput = document.querySelector(
+  "#accountPasswordConfirm"
+);
 const accountEmailField = document.querySelector("#accountEmailField");
 const accountEmailInput = document.querySelector("#accountEmail");
 const accountGenderField = document.querySelector("#accountGenderField");
+const loginRoomField = document.querySelector("#loginRoomField");
+const accessConsent = document.querySelector("#accessConsent");
+const loginSubmitButton = document.querySelector("#loginSubmitButton");
 const adminAccessField = document.querySelector("#adminAccessField");
 const adminPasswordInput = document.querySelector("#adminPassword");
 const forgotPasswordButton = document.querySelector("#forgotPasswordButton");
@@ -45,6 +56,12 @@ const pinnedMessageJump = document.querySelector("#pinnedMessageJump");
 const pinnedMessageAuthor = document.querySelector("#pinnedMessageAuthor");
 const pinnedMessageText = document.querySelector("#pinnedMessageText");
 const roomList = document.querySelector("#roomList");
+const sidebarPrivateMessagesButton = document.querySelector(
+  "#sidebarPrivateMessagesButton"
+);
+const sidebarPrivateUnreadBadge = document.querySelector(
+  "#sidebarPrivateUnreadBadge"
+);
 const userList = document.querySelector("#userList");
 const presenceSelect = document.querySelector("#presenceSelect");
 const adminPanel = document.querySelector("#adminPanel");
@@ -114,6 +131,18 @@ const reportContext = document.querySelector("#reportContext");
 const reportForm = document.querySelector("#reportForm");
 const reportReason = document.querySelector("#reportReason");
 const reportDetails = document.querySelector("#reportDetails");
+const confirmationDialog = document.querySelector("#confirmationDialog");
+const confirmationCloseButton = document.querySelector(
+  "#confirmationCloseButton"
+);
+const confirmationTitle = document.querySelector("#confirmationTitle");
+const confirmationMessage = document.querySelector("#confirmationMessage");
+const confirmationCancelButton = document.querySelector(
+  "#confirmationCancelButton"
+);
+const confirmationAcceptButton = document.querySelector(
+  "#confirmationAcceptButton"
+);
 const roomSidebar = document.querySelector("#roomSidebar");
 const memberSidebar = document.querySelector("#memberSidebar");
 const roomSidebarButton = document.querySelector("#roomSidebarButton");
@@ -227,6 +256,7 @@ let maximumPasswordLength = 128;
 let adminAccessAllowed = true;
 let activePasswordResetToken = "";
 let activeVerificationEmail = "";
+let confirmationResolver = null;
 const currentRoomMessages = new Map();
 const PRESENCE_LABELS = {
   online: "En ligne",
@@ -257,6 +287,10 @@ authModeInputs.forEach((input) => {
   input.addEventListener("change", updateAuthModeRequirements);
 });
 
+accountPasswordConfirmInput.addEventListener("input", () => {
+  accountPasswordConfirmInput.setCustomValidity("");
+});
+
 heroEnterButton.addEventListener("click", () => {
   activateLoginMode("guest");
 });
@@ -279,8 +313,23 @@ loginForm.addEventListener("submit", async (event) => {
   event.preventDefault();
   const data = new FormData(loginForm);
   const authMode = String(data.get("authMode") || "guest");
-  const requestedRoom = String(data.get("room") || "accueil");
+  const requestedRoom =
+    authMode === "guest"
+      ? String(data.get("room") || "accueil")
+      : localStorage.getItem("tchateliaLastRoom") || "accueil";
   const submitButton = loginForm.querySelector('button[type="submit"]');
+
+  if (
+    authMode === "register" &&
+    accountPasswordInput.value !== accountPasswordConfirmInput.value
+  ) {
+    accountPasswordConfirmInput.setCustomValidity(
+      "Les deux mots de passe sont differents."
+    );
+    accountPasswordConfirmInput.reportValidity();
+    return;
+  }
+  accountPasswordConfirmInput.setCustomValidity("");
   submitButton.disabled = true;
 
   try {
@@ -438,7 +487,7 @@ passwordResetCloseButton.addEventListener("click", () => {
 });
 
 passwordResetDialog.addEventListener("click", (event) => {
-  if (event.target === passwordResetDialog) passwordResetDialog.close();
+  closeDialogFromBackdrop(passwordResetDialog, event);
 });
 
 passwordResetRequestForm.addEventListener("submit", (event) => {
@@ -499,7 +548,7 @@ emailVerificationCloseButton.addEventListener("click", () => {
 });
 
 emailVerificationDialog.addEventListener("click", (event) => {
-  if (event.target === emailVerificationDialog) emailVerificationDialog.close();
+  closeDialogFromBackdrop(emailVerificationDialog, event);
 });
 
 emailVerificationResendButton.addEventListener("click", () => {
@@ -557,6 +606,11 @@ sidebarProfileButton.addEventListener("click", () => {
   requestProfile(currentNickname);
 });
 
+sidebarPrivateMessagesButton.addEventListener("click", () => {
+  closeMobilePanels();
+  openPrivateMessages();
+});
+
 accountSettingsButton.addEventListener("click", openAccountSettings);
 
 themeToggleButton.addEventListener("click", () => {
@@ -599,7 +653,7 @@ adminCloseButton.addEventListener("click", () => {
 });
 
 adminDialog.addEventListener("click", (event) => {
-  if (event.target === adminDialog) adminDialog.close();
+  closeDialogFromBackdrop(adminDialog, event);
 });
 
 document.addEventListener("visibilitychange", () => {
@@ -617,7 +671,7 @@ profileCloseButton.addEventListener("click", () => {
 });
 
 profileDialog.addEventListener("click", (event) => {
-  if (event.target === profileDialog) profileDialog.close();
+  closeDialogFromBackdrop(profileDialog, event);
 });
 
 settingsCloseButton.addEventListener("click", () => {
@@ -625,7 +679,7 @@ settingsCloseButton.addEventListener("click", () => {
 });
 
 settingsDialog.addEventListener("click", (event) => {
-  if (event.target === settingsDialog) settingsDialog.close();
+  closeDialogFromBackdrop(settingsDialog, event);
 });
 
 settingsGeneralForm.addEventListener("submit", async (event) => {
@@ -775,7 +829,7 @@ privateCloseButton.addEventListener("click", () => {
 });
 
 privateDialog.addEventListener("click", (event) => {
-  if (event.target === privateDialog) privateDialog.close();
+  closeDialogFromBackdrop(privateDialog, event);
 });
 
 privateMessageForm.addEventListener("submit", (event) => {
@@ -809,7 +863,7 @@ reportCloseButton.addEventListener("click", () => {
 });
 
 reportDialog.addEventListener("click", (event) => {
-  if (event.target === reportDialog) reportDialog.close();
+  closeDialogFromBackdrop(reportDialog, event);
 });
 
 reportForm.addEventListener("submit", (event) => {
@@ -822,6 +876,33 @@ reportForm.addEventListener("submit", (event) => {
     reason: reportReason.value,
     details: reportDetails.value,
   });
+});
+
+confirmationCloseButton.addEventListener("click", () => {
+  settleConfirmation(false);
+});
+
+confirmationCancelButton.addEventListener("click", () => {
+  settleConfirmation(false);
+});
+
+confirmationAcceptButton.addEventListener("click", () => {
+  settleConfirmation(true);
+});
+
+confirmationDialog.addEventListener("cancel", (event) => {
+  event.preventDefault();
+  settleConfirmation(false);
+});
+
+confirmationDialog.addEventListener("click", (event) => {
+  const bounds = confirmationDialog.getBoundingClientRect();
+  const outside =
+    event.clientX < bounds.left ||
+    event.clientX > bounds.right ||
+    event.clientY < bounds.top ||
+    event.clientY > bounds.bottom;
+  if (outside) settleConfirmation(false);
 });
 
 profileForm.addEventListener("submit", (event) => {
@@ -1032,14 +1113,23 @@ socket.on("users", (users) => {
   memberCount.textContent = String(users.length);
   updateCurrentUserSummary();
   userList.innerHTML = "";
-  users.forEach((user) => {
+  const orderedUsers = [...users].sort((left, right) => {
+    const leftRoomOrder = left.room === currentRoom ? 0 : 1;
+    const rightRoomOrder = right.room === currentRoom ? 0 : 1;
+    return (
+      leftRoomOrder - rightRoomOrder ||
+      left.nickname.localeCompare(right.nickname)
+    );
+  });
+
+  orderedUsers.forEach((user) => {
     const item = document.createElement("li");
     item.className = user.nickname === currentNickname ? "is-me" : "";
 
     const button = document.createElement("button");
     button.type = "button";
     button.className = "profile-user-button";
-    button.title = `Voir le profil de ${user.nickname}`;
+    button.title = `Voir le profil de ${user.nickname} dans #${user.room || "accueil"}`;
     const avatar = createAvatar(user, "small");
     avatar.classList.add(`presence-${user.presenceStatus || "online"}`);
     button.append(avatar);
@@ -1059,7 +1149,9 @@ socket.on("users", (users) => {
         : user.account
           ? "membre"
           : "invite";
-    role.textContent = `${formatPresence(user.presenceStatus)} - ${roleLabel}`;
+    role.textContent =
+      `${formatPresence(user.presenceStatus)} - ${roleLabel}` +
+      ` - #${user.room || "accueil"}`;
 
     copy.append(name, role);
     button.append(copy);
@@ -1097,7 +1189,7 @@ function renderRoomList() {
 
     const users = document.createElement("small");
     users.className = "room-user-count";
-    users.textContent = String(room.users);
+    users.textContent = `${room.users} en ligne`;
     users.title = `${room.users} connecte${room.users > 1 ? "s" : ""}`;
     stats.append(users);
 
@@ -1124,6 +1216,7 @@ socket.on("room-updated", ({ room, topic }) => {
   currentRoom = room;
   roomName.textContent = `#${room}`;
   roomTopic.textContent = topic;
+  roomTopic.title = topic;
   renderAdminPanel();
 });
 
@@ -1248,12 +1341,14 @@ socket.on("private-block-changed", ({ nickname }) => {
   }
 });
 
-socket.on("user-block-changed", ({ accountNickname }) => {
+socket.on("user-block-changed", ({ accountNickname, blocked }) => {
   if (
     profileDialog.open &&
     currentProfileAccountNickname === accountNickname
   ) {
-    requestProfile(accountNickname);
+    currentProfileBlockedByMe = Boolean(blocked);
+    profileBlockButton.textContent = blocked ? "Debloquer" : "Bloquer";
+    profilePrivateButton.classList.toggle("hidden", Boolean(blocked));
   }
   if (settingsDialog.open) {
     socket.emit("settings-action", { action: "get" }, (response) => {
@@ -1414,6 +1509,7 @@ function closeMobilePanels() {
 
 function showChat(response) {
   document.body.classList.add("chat-active");
+  document.body.classList.toggle("has-account", currentAccount);
   document.documentElement.scrollTop = 0;
   document.body.scrollTop = 0;
   window.scrollTo(0, 0);
@@ -1421,8 +1517,11 @@ function showChat(response) {
   chatPanel.classList.remove("hidden");
   roomName.textContent = `#${response.room}`;
   roomTopic.textContent = response.topic;
+  roomTopic.title = response.topic;
   myProfileButton.classList.toggle("hidden", !currentAccount);
   privateMessagesButton.classList.toggle("hidden", !currentAccount);
+  sidebarPrivateMessagesButton.classList.toggle("hidden", !currentAccount);
+  themeToggleButton.classList.toggle("hidden", currentAccount);
   favoriteMessagesButton.classList.toggle("hidden", !currentAccount);
   messageFavoritesFilter.classList.toggle("hidden", !currentAccount);
   sidebarProfileButton.classList.toggle("hidden", !currentAccount);
@@ -1456,7 +1555,21 @@ function updateCurrentUserSummary() {
       : currentAccount
         ? "membre"
         : "invite";
-  currentUserInitials.textContent = getInitials(currentNickname);
+  const connectedAccount = currentUsers.find(
+    (user) => user.nickname === currentNickname
+  );
+  currentUserInitials.replaceChildren();
+  const fallback = document.createElement("span");
+  fallback.textContent = getInitials(currentNickname);
+  currentUserInitials.append(fallback);
+  if (connectedAccount?.avatarUrl) {
+    const image = document.createElement("img");
+    image.alt = "";
+    image.referrerPolicy = "no-referrer";
+    image.addEventListener("error", () => image.remove());
+    image.src = connectedAccount.avatarUrl;
+    currentUserInitials.append(image);
+  }
   currentUserInitials.classList.remove(
     "presence-online",
     "presence-away",
@@ -1952,17 +2065,61 @@ function requestProfile(nickname) {
   });
 }
 
-function changeBlockedUser(accountNickname, displayName, shouldBlock) {
+function closeDialogFromBackdrop(dialog, event) {
+  if (event.target !== dialog) return;
+  const bounds = dialog.getBoundingClientRect();
+  const outside =
+    event.clientX < bounds.left ||
+    event.clientX > bounds.right ||
+    event.clientY < bounds.top ||
+    event.clientY > bounds.bottom;
+  if (outside) dialog.close();
+}
+
+function requestConfirmation({
+  title,
+  message,
+  confirmLabel = "Confirmer",
+  danger = false,
+}) {
+  if (confirmationResolver) {
+    confirmationResolver(false);
+  }
+  confirmationTitle.textContent = title;
+  confirmationMessage.textContent = message;
+  confirmationAcceptButton.textContent = confirmLabel;
+  confirmationAcceptButton.classList.toggle("danger-button", danger);
+  if (!confirmationDialog.open) confirmationDialog.showModal();
+  confirmationAcceptButton.focus();
+  return new Promise((resolve) => {
+    confirmationResolver = resolve;
+  });
+}
+
+function settleConfirmation(accepted) {
+  if (confirmationDialog.open) confirmationDialog.close();
+  const resolve = confirmationResolver;
+  confirmationResolver = null;
+  resolve?.(accepted);
+}
+
+async function changeBlockedUser(accountNickname, displayName, shouldBlock) {
   if (!currentAccount || !accountNickname) return;
 
   const keepsModerationVisibility =
     currentRole === "admin" || currentRole === "moderator";
-  const confirmation = shouldBlock
+  const confirmationMessageText = shouldBlock
     ? keepsModerationVisibility
-      ? `Bloquer ${displayName} ? Les messages prives seront bloques. Ses messages publics resteront visibles pour la moderation.`
-      : `Bloquer ${displayName} ? Ses messages publics seront masques et les messages prives seront bloques.`
-    : `Debloquer ${displayName} ?`;
-  if (!confirm(confirmation)) return;
+      ? "Les messages prives seront bloques. Les messages publics resteront visibles pour la moderation."
+      : "Ses messages publics seront masques et les messages prives seront bloques."
+    : "Ses messages publics et la conversation privee seront de nouveau accessibles.";
+  const confirmed = await requestConfirmation({
+    title: shouldBlock ? `Bloquer ${displayName} ?` : `Debloquer ${displayName} ?`,
+    message: confirmationMessageText,
+    confirmLabel: shouldBlock ? "Bloquer" : "Debloquer",
+    danger: shouldBlock,
+  });
+  if (!confirmed) return;
 
   socket.emit(
     "block-action",
@@ -1972,17 +2129,29 @@ function changeBlockedUser(accountNickname, displayName, shouldBlock) {
     },
     (response) => {
       if (!response?.ok) {
-        alert(response?.error || "Le blocage n'a pas pu etre modifie.");
+        showNotificationToast(
+          "Action impossible",
+          response?.error || "Le blocage n'a pas pu etre modifie."
+        );
         return;
       }
 
+      currentProfileBlockedByMe = shouldBlock;
+      if (
+        profileDialog.open &&
+        currentProfileAccountNickname === response.accountNickname
+      ) {
+        profileBlockButton.textContent = shouldBlock ? "Debloquer" : "Bloquer";
+        profilePrivateButton.classList.toggle("hidden", shouldBlock);
+      }
       if (response.settings && settingsDialog.open) {
         renderAccountSettings(response.settings);
       }
-      alert(
+      showNotificationToast(
+        shouldBlock ? "Utilisateur bloque" : "Utilisateur debloque",
         shouldBlock
-          ? `${response.displayName} a ete bloque.`
-          : `${response.displayName} a ete debloque.`
+          ? `Les messages de ${response.displayName} sont maintenant masques.`
+          : `Le profil de ${response.displayName} est de nouveau accessible.`
       );
     }
   );
@@ -2271,6 +2440,8 @@ function renderPrivateState(totalUnread) {
   privateUnreadTotal = totalUnread;
   privateUnreadBadge.textContent = totalUnread;
   privateUnreadBadge.classList.toggle("hidden", totalUnread === 0);
+  sidebarPrivateUnreadBadge.textContent = totalUnread;
+  sidebarPrivateUnreadBadge.classList.toggle("hidden", totalUnread === 0);
   updateDocumentTitle();
   privateConversationList.innerHTML = "";
 
@@ -2350,7 +2521,7 @@ function renderPrivateConversation(conversation) {
     : conversation.blockedByMe
       ? "Utilisateur bloque"
       : conversation.blockedByThem
-        ? "Cette personne vous a bloque"
+      ? "Cette personne t'a bloque"
         : formatRole(conversation.participant.role);
 
   privateBlockButton.textContent = conversation.blockedByMe ? "Debloquer" : "Bloquer";
@@ -2457,12 +2628,35 @@ function resizeAvatar(file) {
 function updateAuthModeRequirements() {
   const mode = document.querySelector('input[name="authMode"]:checked')?.value;
   accountPasswordInput.required = mode === "login" || mode === "register";
+  accountPasswordLabel.classList.toggle("hidden", mode === "guest");
+  accountPasswordInput.classList.toggle("hidden", mode === "guest");
+  if (mode === "guest") accountPasswordInput.value = "";
   accountPasswordInput.minLength =
     mode === "register" ? minimumPasswordLength : 0;
   accountPasswordInput.maxLength = maximumPasswordLength;
+  accountPasswordInput.autocomplete =
+    mode === "register" ? "new-password" : "current-password";
+  accountPasswordLabel.textContent =
+    mode === "register" ? "Creer un mot de passe" : "Mot de passe";
+  accountPasswordHelp.classList.toggle("hidden", mode !== "register");
+  accountPasswordHelp.textContent =
+    `${minimumPasswordLength} caracteres minimum. ` +
+    "Evite ton pseudo et les mots de passe trop simples.";
+  accountPasswordConfirmField.classList.toggle("hidden", mode !== "register");
+  accountPasswordConfirmInput.required = mode === "register";
+  accountPasswordConfirmInput.minLength =
+    mode === "register" ? minimumPasswordLength : 0;
+  accountPasswordConfirmInput.maxLength = maximumPasswordLength;
+  if (mode !== "register") {
+    accountPasswordConfirmInput.value = "";
+    accountPasswordConfirmInput.setCustomValidity("");
+  }
   accountEmailField.classList.toggle("hidden", mode !== "register");
   accountGenderField.classList.toggle("hidden", mode !== "register");
   accountEmailInput.required = mode === "register";
+  loginRoomField.classList.toggle("hidden", mode !== "guest");
+  accessConsent.classList.toggle("hidden", mode === "login");
+  accessConsent.querySelector("input").required = mode !== "login";
   adminAccessField.classList.toggle("hidden", !adminAccessAllowed);
   adminPasswordInput.disabled = !adminAccessAllowed;
   if (!adminAccessAllowed) adminPasswordInput.value = "";
@@ -2471,11 +2665,13 @@ function updateAuthModeRequirements() {
     mode !== "login" || !passwordResetEnabled
   );
   accountPasswordInput.placeholder =
+    mode === "register" ? `${minimumPasswordLength} caracteres minimum` : "";
+  loginSubmitButton.textContent =
     mode === "register"
-      ? `${minimumPasswordLength} caracteres minimum`
+      ? "Creer mon compte"
       : mode === "login"
-        ? "Mot de passe du compte"
-        : "Optionnel";
+        ? "Me connecter"
+        : "Entrer dans le tchat";
 }
 
 function activateLoginMode(mode) {
@@ -2588,7 +2784,7 @@ function joinChat(payload, { automatic = false } = {}) {
         }
         return;
       }
-      handleJoinFailure(response, { automatic });
+      handleJoinFailure(response, { automatic, payload });
       return;
     }
 
@@ -2605,10 +2801,19 @@ function joinChat(payload, { automatic = false } = {}) {
   });
 }
 
-function handleJoinFailure(response = {}, { automatic = false } = {}) {
+function handleJoinFailure(
+  response = {},
+  { automatic = false, payload = {} } = {}
+) {
   currentAccount = false;
   resetTurnstile();
   if (response.verificationRequired) {
+    if (payload.authMode === "register") {
+      localStorage.setItem(
+        "tchateliaPendingVerificationNickname",
+        String(payload.nickname || "")
+      );
+    }
     openEmailVerificationDialog({
       email: response.email,
       message: response.message,
@@ -2675,6 +2880,7 @@ async function initializePublicProtection() {
 
 function applyPasswordRequirements() {
   [
+    accountPasswordConfirmInput,
     settingsNewPassword,
     settingsConfirmPassword,
     passwordResetNewPassword,
@@ -2768,6 +2974,13 @@ function openEmailVerificationFromUrl() {
       );
       if (response?.ok) {
         window.history.replaceState({}, document.title, window.location.pathname);
+        const pendingNickname =
+          localStorage.getItem("tchateliaPendingVerificationNickname") || "";
+        if (pendingNickname) {
+          nicknameInput.value = pendingNickname;
+          localStorage.removeItem("tchateliaPendingVerificationNickname");
+        }
+        activateLoginMode("login");
       }
     }
   );
@@ -3003,6 +3216,10 @@ function renderMessage(message) {
   row.classList.toggle("is-favorite", Boolean(message.isFavorite));
 
   if (message.type === "system") {
+    if (isPresenceSystemMessage(message.text)) {
+      renderPresenceSystemMessage(message);
+      return;
+    }
     row.textContent = message.text;
     placeMessageRow(row, message.id);
     return;
@@ -3113,9 +3330,13 @@ function renderMessage(message) {
 
   if (!message.deletedAt) {
     actions.append(
-      createMessageActionButton("Repondre", () => {
-        setMessageAction("reply", message);
-      })
+      createMessageActionButton(
+        "\u21a9 Repondre",
+        () => {
+          setMessageAction("reply", message);
+        },
+        "primary"
+      )
     );
   }
 
@@ -3203,6 +3424,40 @@ function renderMessage(message) {
 
   if (actions.childElementCount) content.append(actions);
   placeMessageRow(row, message.id);
+}
+
+function isPresenceSystemMessage(text) {
+  return /vient d'entrer dans le salon|a quitte le salon/i.test(
+    String(text || "")
+  );
+}
+
+function renderPresenceSystemMessage(message) {
+  let group = messages.lastElementChild;
+  if (!group?.classList.contains("presence-event-group")) {
+    group = document.createElement("details");
+    group.className = "message system presence-event-group";
+
+    const summary = document.createElement("summary");
+    const label = document.createElement("span");
+    label.textContent = "Activite du salon";
+    const count = document.createElement("small");
+    summary.append(label, count);
+
+    const events = document.createElement("div");
+    events.className = "presence-event-list";
+    group.append(summary, events);
+    messages.append(group);
+  }
+
+  const events = group.querySelector(".presence-event-list");
+  const event = document.createElement("p");
+  event.textContent = message.text;
+  events.append(event);
+
+  const count = events.childElementCount;
+  group.querySelector("summary small").textContent =
+    `${count} arrivee${count > 1 ? "s" : ""} ou depart${count > 1 ? "s" : ""}`;
 }
 
 function createMessageActionButton(label, action, style = "") {
@@ -3418,7 +3673,7 @@ function setMessageAction(mode, message) {
 
   composerContextTitle.textContent =
     mode === "edit"
-      ? "Modification de votre message"
+      ? "Modification de ton message"
       : `Reponse a ${message.nickname}`;
   composerContextText.textContent = message.text;
   composerContext.classList.remove("hidden");

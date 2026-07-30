@@ -10,7 +10,7 @@
     />
     <meta name="theme-color" content="#0B1020" />
     <link rel="icon" href="data:," />
-    <link rel="stylesheet" href="/styles.css?v=20260727-1" />
+    <link rel="stylesheet" href="/styles.css?v=20260730-2" />
   </head>
   <body>
     <main class="shell">
@@ -34,8 +34,8 @@
             <h1>tchatelia</h1>
             <h2>Discutez. Rencontrez. Partagez.</h2>
             <p class="intro">
-              Rejoignez des discussions vivantes, faites de nouvelles rencontres et retrouvez
-              votre communaute dans un espace simple et convivial.
+              Rejoins des discussions vivantes, fais de nouvelles rencontres et retrouve
+              ta communaute dans un espace simple et convivial.
             </p>
             <div class="hero-actions">
               <button class="hero-primary-button" id="heroEnterButton" type="button">
@@ -87,12 +87,12 @@
             <div class="login-form-heading">
               <p class="eyebrow">Bienvenue</p>
               <h2>Rejoindre la conversation</h2>
-              <p>Entrez directement ou connectez-vous a votre profil.</p>
+              <p>Entre directement ou connecte-toi a ton profil.</p>
             </div>
             <div class="auth-mode">
               <label>
                 <input type="radio" name="authMode" value="guest" checked />
-                Invite
+                Invitation
               </label>
               <label>
                 <input type="radio" name="authMode" value="login" />
@@ -114,15 +114,28 @@
               required
             />
 
-            <label for="accountPassword">Mot de passe du compte</label>
+            <label for="accountPassword" id="accountPasswordLabel">Mot de passe</label>
             <input
               id="accountPassword"
               name="accountPassword"
               type="password"
               maxlength="128"
               autocomplete="current-password"
-              placeholder="Connexion ou inscription"
             />
+            <small class="field-help hidden" id="accountPasswordHelp">
+              8 caracteres minimum. Evite ton pseudo et les mots de passe trop simples.
+            </small>
+
+            <div class="account-password-confirm-field hidden" id="accountPasswordConfirmField">
+              <label for="accountPasswordConfirm">Confirmer le mot de passe</label>
+              <input
+                id="accountPasswordConfirm"
+                name="accountPasswordConfirm"
+                type="password"
+                maxlength="128"
+                autocomplete="new-password"
+              />
+            </div>
 
             <div class="account-email-field hidden" id="accountEmailField">
               <label for="accountEmail">Adresse e-mail</label>
@@ -163,13 +176,15 @@
               Mot de passe oublie ?
             </button>
 
-            <label for="room">Salon</label>
-            <select id="room" name="room">
-              <option value="accueil">#accueil</option>
-              <option value="aide">#aide</option>
-              <option value="musique">#musique</option>
-              <option value="rencontres">#rencontres</option>
-            </select>
+            <div class="login-room-field" id="loginRoomField">
+              <label for="room">Salon de depart</label>
+              <select id="room" name="room">
+                <option value="accueil">Accueil</option>
+                <option value="aide">Aide</option>
+                <option value="musique">Musique</option>
+                <option value="rencontres">Rencontres</option>
+              </select>
+            </div>
 
             <div class="admin-access-field" id="adminAccessField">
               <label for="adminPassword">Mot de passe admin</label>
@@ -188,7 +203,7 @@
               <div id="turnstileWidget"></div>
             </div>
 
-            <label class="access-consent">
+            <label class="access-consent" id="accessConsent">
               <input name="legalAccepted" type="checkbox" required />
               <span>
                 J'ai au moins 15 ans et j'accepte le
@@ -198,7 +213,7 @@
               </span>
             </label>
 
-            <button type="submit">Entrer dans le tchat</button>
+            <button id="loginSubmitButton" type="submit">Entrer dans le tchat</button>
             <nav class="login-legal-links" aria-label="Informations legales">
               <a href="/reglement.html">Reglement</a>
               <a href="/conditions.html">Conditions</a>
@@ -248,6 +263,16 @@
               </button>
             </div>
             <div class="room-list" id="roomList"></div>
+            <button
+              class="sidebar-private-button hidden"
+              id="sidebarPrivateMessagesButton"
+              type="button"
+              title="Ouvrir les messages prives"
+            >
+              <span aria-hidden="true">&#9993;</span>
+              <span>Messages prives</span>
+              <small class="hidden" id="sidebarPrivateUnreadBadge">0</small>
+            </button>
           </div>
 
           <div class="sidebar-account">
@@ -292,7 +317,7 @@
             </button>
             <div class="room-heading">
               <p class="eyebrow" id="roomName">#accueil</p>
-              <h1 id="roomTopic">Salon general pour discuter librement.</h1>
+              <h1 id="roomTopic" tabindex="0">Salon general pour discuter librement.</h1>
             </div>
             <div class="chat-header-actions">
               <button
@@ -313,12 +338,22 @@
                 <span aria-hidden="true">&#9733;</span>
                 <span class="button-label">Favoris</span>
               </button>
-              <button class="ghost-button hidden" id="privateMessagesButton" type="button">
+              <button
+                class="ghost-button hidden"
+                id="privateMessagesButton"
+                type="button"
+                title="Ouvrir les messages prives"
+              >
                 <span aria-hidden="true">&#9993;</span>
                 <span class="button-label">Messages</span>
                 <span class="private-unread-badge hidden" id="privateUnreadBadge">0</span>
               </button>
-              <button class="ghost-button hidden" id="myProfileButton" type="button">
+              <button
+                class="ghost-button hidden"
+                id="myProfileButton"
+                type="button"
+                title="Ouvrir mon profil"
+              >
                 <span aria-hidden="true">&#9786;</span>
                 <span class="button-label">Profil</span>
               </button>
@@ -332,7 +367,7 @@
                 <span class="button-label">Parametres</span>
               </button>
               <button
-                class="ghost-button"
+                class="ghost-button hidden"
                 id="themeToggleButton"
                 type="button"
                 title="Passer au mode clair"
@@ -465,7 +500,7 @@
         <aside class="member-sidebar" id="memberSidebar">
           <div class="member-sidebar-header">
             <div>
-              <p class="eyebrow">Dans ce salon</p>
+              <p class="eyebrow">Tous les salons</p>
               <h2>Connectes <span id="memberCount">0</span></h2>
             </div>
             <button
@@ -684,13 +719,13 @@
             <div class="theme-options">
               <label>
                 <input type="radio" name="settingsTheme" value="dark" />
-                <span aria-hidden="true">&#9790;</span>
-                Sombre
+                <span class="theme-preview theme-preview-dark" aria-hidden="true"></span>
+                <span>Sombre</span>
               </label>
               <label>
                 <input type="radio" name="settingsTheme" value="light" />
-                <span aria-hidden="true">&#9728;</span>
-                Clair
+                <span class="theme-preview theme-preview-light" aria-hidden="true"></span>
+                <span>Clair</span>
               </label>
             </div>
             <small>Ce choix est memorise sur cet appareil.</small>
@@ -957,7 +992,31 @@
       </form>
     </dialog>
 
+    <dialog
+      class="confirmation-dialog"
+      id="confirmationDialog"
+      aria-labelledby="confirmationTitle"
+    >
+      <button
+        class="profile-close-button"
+        id="confirmationCloseButton"
+        type="button"
+        aria-label="Fermer"
+      >
+        X
+      </button>
+      <p class="eyebrow">Confirmation</p>
+      <h2 id="confirmationTitle">Confirmer cette action</h2>
+      <p id="confirmationMessage"></p>
+      <div class="confirmation-actions">
+        <button class="secondary-button" id="confirmationCancelButton" type="button">
+          Annuler
+        </button>
+        <button id="confirmationAcceptButton" type="button">Confirmer</button>
+      </div>
+    </dialog>
+
     <script src="/socket.io/socket.io.js"></script>
-    <script src="/app.js?v=20260726-5"></script>
+    <script src="/app.js?v=20260730-2"></script>
   </body>
 </html>

@@ -1703,7 +1703,7 @@ io.on("connection", (socket) => {
       bio: cleanBio,
       avatarUrl: cleanAvatar,
     });
-    for (const room of rooms.keys()) publishUsers(room);
+    publishUsers();
     emitPrivateSystem(socket, "Ton profil a ete mis a jour.");
     await sendProfile(socket, user, user.nickname);
   });
@@ -4050,14 +4050,14 @@ async function sendSystem(room, text) {
   });
 }
 
-function publishUsers(room) {
+function publishUsers() {
   const connected = [...users.values()]
-    .filter((user) => user.room === room)
     .map((user) => ({
       nickname: user.nickname,
       role: user.role,
       gender: normalizeGender(user.gender),
       account: user.account,
+      room: user.room,
       mutedUntil:
         !MODERATION_ROLES.has(user.role) && user.mutedUntil > Date.now()
           ? user.mutedUntil
@@ -4072,7 +4072,7 @@ function publishUsers(room) {
     }))
     .sort((a, b) => a.nickname.localeCompare(b.nickname));
 
-  io.to(room).emit("users", connected);
+  io.emit("users", connected);
   io.emit("rooms", getRoomList());
 }
 
