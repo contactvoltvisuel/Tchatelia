@@ -46,6 +46,16 @@ export function getAutomaticMuteDuration(violationCount, severe = false) {
   return AUTOMATIC_MUTE_DURATIONS_MS[durationIndex];
 }
 
+export function classifyModerationIncident({ severe = false, muted = false } = {}) {
+  if (severe) {
+    return { severity: "critical", automaticAction: "auto_mute" };
+  }
+  if (muted) {
+    return { severity: "intervention", automaticAction: "auto_mute" };
+  }
+  return { severity: "watch", automaticAction: "warning" };
+}
+
 export function formatModerationDuration(durationMs) {
   const totalSeconds = Math.max(1, Math.ceil(Number(durationMs) / 1000));
   if (totalSeconds < 60) return `${totalSeconds} seconde${totalSeconds > 1 ? "s" : ""}`;

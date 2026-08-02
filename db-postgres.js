@@ -133,6 +133,25 @@ export async function initDatabase() {
       created_at BIGINT NOT NULL
     );
 
+    CREATE TABLE IF NOT EXISTS moderation_incidents (
+      id TEXT PRIMARY KEY,
+      subject_key TEXT NOT NULL,
+      target_display TEXT NOT NULL,
+      room TEXT NOT NULL,
+      category TEXT NOT NULL,
+      severity TEXT NOT NULL,
+      automatic_action TEXT NOT NULL,
+      content_snapshot TEXT NOT NULL,
+      violation_count INTEGER NOT NULL,
+      status TEXT NOT NULL,
+      handled_by TEXT NOT NULL,
+      created_at BIGINT NOT NULL,
+      handled_at BIGINT
+    );
+
+    CREATE INDEX IF NOT EXISTS moderation_incidents_status_created_idx
+      ON moderation_incidents (status, created_at DESC);
+
     CREATE TABLE IF NOT EXISTS security_events (
       id TEXT PRIMARY KEY,
       event_type TEXT NOT NULL,
@@ -351,6 +370,86 @@ export async function saveModerationLog(log) {
       LIMIT 500
     )
   `);
+}
+
+export async function createModerationIncident(incident) {
+  await pool.query(
+    `
+      INSERT INTO moderation_incidents (
+        id, subject_key, target_display, room, category, severity,
+        automatic_action, content_snapshot, violation_count, status,
+        handled_by, created_at, handled_at
+      )
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'open', '', $10, NULL)
+    `,
+    [
+      incident.id,
+      incident.subjectKey,
+      incident.targetDisplay,
+      incident.room,
+      incident.category,
+      incident.severity,
+      incident.automaticAction,
+      incident.contentSnapshot,
+      incident.violationCount,
+      incident.createdAt,
+    ]
+  );
+}
+
+export async function listModerationIncidents(limit = 100) {
+  const result = await pool.query(
+    `
+      SELECT id, target_display AS "targetDisplay", room, category, severity,
+        automatic_action AS "automaticAction", content_snapshot AS "contentSnapshot",
+        violation_count AS "violationCount", status, handled_by AS "handledBy",
+        created_at AS "createdAt", handled_at AS "handledAt"
+      FROM moderation_incidents
+      ORDER BY CASE WHEN status = 'open' THEN 0 ELSE 1 END, created_at DESC
+      LIMIT $1
+    `,
+    [limit]
+  );
+  return result.rows;
+}
+
+export async function getModerationIncidentById(id) {
+  const result = await pool.query(
+    `
+      SELECT id, target_display AS "targetDisplay", room, category, severity,
+        automatic_action AS "automaticAction", content_snapshot AS "contentSnapshot",
+        violation_count AS "violationCount", status, handled_by AS "handledBy",
+        created_at AS "createdAt", handled_at AS "handledAt"
+      FROM moderation_incidents
+      WHERE id = $1
+    `,
+    [id]
+  );
+  return result.rows[0];
+}
+
+export async function updateModerationIncidentStatus(id, status, handledBy) {
+  await pool.query(
+    `
+      UPDATE moderation_incidents
+      SET status = $1, handled_by = $2, handled_at = $3
+      WHERE id = $4
+    `,
+    [status, handledBy, Date.now(), id]
+  );
+  await pool.query(`
+    DELETE FROM moderation_incidents
+    WHERE status != 'open'
+      AND id NOT IN (
+        SELECT id FROM moderation_incidents
+        ORDER BY created_at DESC
+        LIMIT 1000
+      )
+  `);
+  await pool.query(
+    "DELETE FROM moderation_incidents WHERE status != 'open' AND handled_at < $1",
+    [Date.now() - 730 * 24 * 60 * 60 * 1000]
+  );
 }
 
 export async function listSecurityEvents(limit = 100) {

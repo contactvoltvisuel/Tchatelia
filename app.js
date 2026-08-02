@@ -80,6 +80,11 @@ const adminAccountList = document.querySelector("#adminAccountList");
 const adminModerationLogPanel = document.querySelector(".admin-moderation-log-panel");
 const adminRefreshLogsButton = document.querySelector("#adminRefreshLogsButton");
 const adminModerationLogList = document.querySelector("#adminModerationLogList");
+const adminRefreshIncidentsButton = document.querySelector(
+  "#adminRefreshIncidentsButton"
+);
+const adminIncidentOpenCount = document.querySelector("#adminIncidentOpenCount");
+const adminIncidentList = document.querySelector("#adminIncidentList");
 const adminSecurityPanel = document.querySelector(".admin-security-panel");
 const adminRefreshSecurityButton = document.querySelector("#adminRefreshSecurityButton");
 const adminSecurityEventCount = document.querySelector("#adminSecurityEventCount");
@@ -226,6 +231,7 @@ let currentPresenceStatus = "online";
 let currentUsers = [];
 let currentAccounts = [];
 let currentModerationLogs = [];
+let currentModerationIncidents = [];
 let currentSecurityEvents = [];
 let currentReports = [];
 let currentContactMessages = [];
@@ -1023,6 +1029,12 @@ adminRefreshLogsButton.addEventListener("click", () => {
   });
 });
 
+adminRefreshIncidentsButton.addEventListener("click", () => {
+  socket.emit("moderation-incident-action", {
+    action: "list",
+  });
+});
+
 adminRefreshSecurityButton.addEventListener("click", () => {
   socket.emit("security-action", {
     action: "list",
@@ -1228,6 +1240,11 @@ socket.on("accounts", (accounts) => {
 socket.on("moderation-logs", (logs) => {
   currentModerationLogs = logs;
   renderModerationLog();
+});
+
+socket.on("moderation-incidents", (incidents) => {
+  currentModerationIncidents = incidents;
+  renderModerationIncidents();
 });
 
 socket.on("security-events", (events) => {
@@ -1590,6 +1607,8 @@ function renderAdminPanel() {
     adminUserList.innerHTML = "";
     adminAccountList.innerHTML = "";
     adminModerationLogList.innerHTML = "";
+    adminIncidentList.innerHTML = "";
+    adminIncidentOpenCount.textContent = "0 a verifier";
     adminSecurityList.innerHTML = "";
     adminReportList.innerHTML = "";
     adminContactList.innerHTML = "";
@@ -1609,6 +1628,9 @@ function renderAdminPanel() {
   adminContactPanel.classList.toggle("hidden", !canManage);
   adminDeleteRoomButton.disabled = currentRoom === "accueil";
   socket.emit("report-action", {
+    action: "list",
+  });
+  socket.emit("moderation-incident-action", {
     action: "list",
   });
 
@@ -1781,6 +1803,104 @@ function renderModerationLog() {
     row.append(title, details, meta);
     adminModerationLogList.append(row);
   });
+}
+
+function renderModerationIncidents() {
+  if (currentRole !== "admin" && currentRole !== "moderator") return;
+
+  const openCount = currentModerationIncidents.filter(
+    (incident) => incident.status === "open"
+  ).length;
+  adminIncidentOpenCount.textContent = `${openCount} a verifier`;
+  adminIncidentList.innerHTML = "";
+
+  if (!currentModerationIncidents.length) {
+    const empty = document.createElement("p");
+    empty.className = "admin-empty";
+    empty.textContent = "Aucun incident detecte par Sentinelle.";
+    adminIncidentList.append(empty);
+    return;
+  }
+
+  currentModerationIncidents.forEach((incident) => {
+    const row = document.createElement("article");
+    row.className = `admin-incident severity-${incident.severity} ${incident.status}`;
+
+    const heading = document.createElement("div");
+    heading.className = "admin-incident-heading";
+
+    const title = document.createElement("strong");
+    title.textContent = incident.targetDisplay;
+
+    const severity = document.createElement("span");
+    severity.className = "admin-incident-severity";
+    severity.textContent = formatIncidentSeverity(incident.severity);
+    heading.append(title, severity);
+
+    const reason = document.createElement("span");
+    reason.textContent = incident.category;
+
+    const action = document.createElement("small");
+    action.textContent = `Action : ${formatIncidentAction(incident.automaticAction)} - infraction ${incident.violationCount}`;
+
+    row.append(heading, reason);
+    if (incident.contentSnapshot) {
+      const snapshot = document.createElement("p");
+      snapshot.textContent = incident.contentSnapshot;
+      row.append(snapshot);
+    }
+
+    const date = new Intl.DateTimeFormat("fr-FR", {
+      dateStyle: "short",
+      timeStyle: "short",
+    }).format(Number(incident.createdAt));
+    const meta = document.createElement("small");
+    meta.textContent = `${date} - #${incident.room}`;
+    row.append(action, meta);
+
+    if (incident.status === "open") {
+      const actions = document.createElement("div");
+      actions.className = "admin-incident-actions";
+      actions.append(
+        createIncidentActionButton("Verifier", "review", incident.id),
+        createIncidentActionButton("Classer sans suite", "dismiss", incident.id)
+      );
+      row.append(actions);
+    } else {
+      const status = document.createElement("small");
+      status.className = "admin-incident-status";
+      status.textContent =
+        incident.status === "reviewed"
+          ? `Verifie par ${incident.handledBy}`
+          : `Classe par ${incident.handledBy}`;
+      row.append(status);
+    }
+
+    adminIncidentList.append(row);
+  });
+}
+
+function createIncidentActionButton(label, action, id) {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.textContent = label;
+  button.addEventListener("click", () => {
+    socket.emit("moderation-incident-action", { action, id });
+  });
+  return button;
+}
+
+function formatIncidentSeverity(severity) {
+  const labels = {
+    watch: "A surveiller",
+    intervention: "Intervention",
+    critical: "Critique",
+  };
+  return labels[severity] || "A verifier";
+}
+
+function formatIncidentAction(action) {
+  return action === "auto_mute" ? "mute temporaire" : "avertissement";
 }
 
 function renderSecurityEvents() {
@@ -2002,6 +2122,8 @@ function formatLogAction(action) {
     unban: "Debannissement",
     unmute: "Mute retire",
     auto_mute: "Mute automatique",
+    sentinelle_reviewed: "Incident Sentinelle verifie",
+    sentinelle_dismissed: "Incident Sentinelle classe",
     account_role: "Role modifie",
     account_enabled: "Compte reactive",
     account_disabled: "Compte desactive",

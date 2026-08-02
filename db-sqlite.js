@@ -143,6 +143,25 @@ export async function initDatabase() {
       created_at INTEGER NOT NULL
     );
 
+    CREATE TABLE IF NOT EXISTS moderation_incidents (
+      id TEXT PRIMARY KEY,
+      subject_key TEXT NOT NULL,
+      target_display TEXT NOT NULL,
+      room TEXT NOT NULL,
+      category TEXT NOT NULL,
+      severity TEXT NOT NULL,
+      automatic_action TEXT NOT NULL,
+      content_snapshot TEXT NOT NULL,
+      violation_count INTEGER NOT NULL,
+      status TEXT NOT NULL,
+      handled_by TEXT NOT NULL,
+      created_at INTEGER NOT NULL,
+      handled_at INTEGER
+    );
+
+    CREATE INDEX IF NOT EXISTS moderation_incidents_status_created_idx
+      ON moderation_incidents (status, created_at DESC);
+
     CREATE TABLE IF NOT EXISTS security_events (
       id TEXT PRIMARY KEY,
       event_type TEXT NOT NULL,
@@ -391,6 +410,75 @@ export async function saveModerationLog(log) {
       LIMIT 500
     )
   `);
+}
+
+export async function createModerationIncident(incident) {
+  db.prepare(`
+    INSERT INTO moderation_incidents (
+      id, subject_key, target_display, room, category, severity,
+      automatic_action, content_snapshot, violation_count, status,
+      handled_by, created_at, handled_at
+    )
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'open', '', ?, NULL)
+  `).run(
+    incident.id,
+    incident.subjectKey,
+    incident.targetDisplay,
+    incident.room,
+    incident.category,
+    incident.severity,
+    incident.automaticAction,
+    incident.contentSnapshot,
+    incident.violationCount,
+    incident.createdAt
+  );
+}
+
+export async function listModerationIncidents(limit = 100) {
+  return db
+    .prepare(`
+      SELECT id, target_display AS targetDisplay, room, category, severity,
+        automatic_action AS automaticAction, content_snapshot AS contentSnapshot,
+        violation_count AS violationCount, status, handled_by AS handledBy,
+        created_at AS createdAt, handled_at AS handledAt
+      FROM moderation_incidents
+      ORDER BY CASE WHEN status = 'open' THEN 0 ELSE 1 END, created_at DESC
+      LIMIT ?
+    `)
+    .all(limit);
+}
+
+export async function getModerationIncidentById(id) {
+  return db
+    .prepare(`
+      SELECT id, target_display AS targetDisplay, room, category, severity,
+        automatic_action AS automaticAction, content_snapshot AS contentSnapshot,
+        violation_count AS violationCount, status, handled_by AS handledBy,
+        created_at AS createdAt, handled_at AS handledAt
+      FROM moderation_incidents
+      WHERE id = ?
+    `)
+    .get(id);
+}
+
+export async function updateModerationIncidentStatus(id, status, handledBy) {
+  db.prepare(`
+    UPDATE moderation_incidents
+    SET status = ?, handled_by = ?, handled_at = ?
+    WHERE id = ?
+  `).run(status, handledBy, Date.now(), id);
+  db.exec(`
+    DELETE FROM moderation_incidents
+    WHERE status != 'open'
+      AND id NOT IN (
+        SELECT id FROM moderation_incidents
+        ORDER BY created_at DESC
+        LIMIT 1000
+      )
+  `);
+  db.prepare(
+    "DELETE FROM moderation_incidents WHERE status != 'open' AND handled_at < ?"
+  ).run(Date.now() - 730 * 24 * 60 * 60 * 1000);
 }
 
 export async function listSecurityEvents(limit = 100) {

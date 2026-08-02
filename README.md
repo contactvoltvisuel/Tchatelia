@@ -41,6 +41,8 @@ Prerequis : Node.js 24 ou plus recent.
 - Panneau admin : kick, ban, unban, creation et suppression de salons.
 - Historique et bannissements sauvegardes en SQLite local ou PostgreSQL/Supabase.
 - Moderation automatique : avertissement, mutes temporaires progressifs et termes configurables.
+- Sentinelle Tchatelia : file persistante des incidents automatiques avec niveaux de gravite,
+  extrait du message et validation par un administrateur ou un moderateur.
 - Alertes de moderation par e-mail lorsqu'aucun admin ou moderateur n'est connecte.
 - Protection publique : limites de connexion et d'inscription, verrouillage apres plusieurs echecs
   et journal de securite reserve aux administrateurs.

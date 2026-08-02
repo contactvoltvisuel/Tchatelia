@@ -1430,6 +1430,144 @@ button:hover {
   }
 }
 
+.admin-incident-panel {
+  display: grid;
+  gap: 10px;
+}
+
+.admin-section-title > div {
+  min-width: 0;
+}
+
+.admin-section-count {
+  display: block;
+  margin-top: 3px;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.admin-section-help {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.admin-incident-list {
+  max-height: 480px;
+  display: grid;
+  gap: 8px;
+  overflow-y: auto;
+}
+
+.admin-incident {
+  display: grid;
+  gap: 6px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-left: 4px solid #f1b84b;
+  border-radius: 6px;
+  color: var(--ink);
+  background: var(--canvas);
+  font-size: 12px;
+}
+
+.admin-incident.severity-intervention {
+  border-left-color: #ff8a65;
+}
+
+.admin-incident.severity-critical {
+  border-left-color: #ff5f6d;
+}
+
+.admin-incident.reviewed,
+.admin-incident.dismissed {
+  border-left-color: var(--muted);
+  opacity: 0.7;
+}
+
+.admin-incident-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.admin-incident-heading strong,
+.admin-incident span,
+.admin-incident p,
+.admin-incident small {
+  overflow-wrap: anywhere;
+}
+
+.admin-incident-severity {
+  flex: 0 0 auto;
+  padding: 3px 6px;
+  border: 1px solid currentColor;
+  border-radius: 4px;
+  color: #c68a17;
+  font-size: 10px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.severity-intervention .admin-incident-severity {
+  color: #e76b46;
+}
+
+.severity-critical .admin-incident-severity {
+  color: #f04d5d;
+}
+
+.admin-incident p {
+  margin: 0;
+  padding: 8px;
+  border-radius: 4px;
+  background: var(--paper);
+  line-height: 1.45;
+}
+
+.admin-incident small {
+  color: var(--muted);
+  line-height: 1.35;
+}
+
+.admin-incident-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+}
+
+.admin-incident-actions button {
+  min-height: 32px;
+  padding: 0 7px;
+  border: 1px solid var(--line);
+  color: var(--accent-dark);
+  background: var(--panel);
+  font-size: 11px;
+}
+
+.admin-incident-actions button:last-child {
+  color: var(--muted);
+}
+
+.admin-incident-status {
+  font-weight: 700;
+}
+
+html[data-theme="light"] .admin-incident {
+  color: var(--ink);
+  background: #f7f9fc;
+}
+
+html[data-theme="light"] .admin-incident p {
+  background: #eef2f7;
+}
+
+html[data-theme="light"] .admin-incident-actions button {
+  background: #ffffff;
+}
+
 /* Interface Tchatelia v2 */
 :root {
   --ink: #18221f;

@@ -19,6 +19,7 @@ import {
   clearAccountEmailTokens,
   clearTemporaryMute,
   createContactMessage,
+  createModerationIncident,
   createAccount,
   createAccountSession,
   createEmailVerificationToken,
@@ -37,6 +38,7 @@ import {
   getContactMessageById,
   getDatabaseLabel,
   getMessageById,
+  getModerationIncidentById,
   getPrivateBlockState,
   getPrivateConversation,
   getPrivateMessageById,
@@ -50,6 +52,7 @@ import {
   hasOpenReport,
   listAccounts,
   listContactMessages,
+  listModerationIncidents,
   listModerationLogs,
   listFavoriteMessageIds,
   listPrivateBlocks,
@@ -79,6 +82,7 @@ import {
   updateContactMessageStatus,
   updateMessageReactions,
   updateMessageText,
+  updateModerationIncidentStatus,
   updateRoomTopic,
   updateReportStatus,
 } from "./db.js";
@@ -97,6 +101,7 @@ import {
   parseAllowedIpAddresses,
 } from "./security.js";
 import {
+  classifyModerationIncident,
   findBlockedTerm,
   formatModerationDuration,
   getAutomaticMuteDuration,
@@ -1661,6 +1666,16 @@ io.on("connection", (socket) => {
     }
 
     if (action === "list") await sendModerationLogs(socket);
+  });
+
+  socket.on("moderation-incident-action", async (payload = {}) => {
+    const user = users.get(socket.id);
+    if (!user || !MODERATION_ROLES.has(user.role)) {
+      emitPrivateSystem(socket, "Les incidents Sentinelle sont reserves a la moderation.");
+      return;
+    }
+
+    await handleModerationIncidentAction(socket, user, payload);
   });
 
   socket.on("security-action", async ({ action } = {}) => {
@@ -3432,6 +3447,71 @@ async function handleRoomAction(socket, admin, action, rawName, rawTopic) {
   }
 }
 
+async function sendModerationIncidents(socket) {
+  socket.emit("moderation-incidents", await listModerationIncidents(100));
+}
+
+async function broadcastModerationIncidents() {
+  const incidents = await listModerationIncidents(100);
+  for (const [socketId, user] of users.entries()) {
+    if (MODERATION_ROLES.has(user.role)) {
+      io.to(socketId).emit("moderation-incidents", incidents);
+    }
+  }
+}
+
+async function recordSentinelleIncident(
+  user,
+  { category, severity, automaticAction, excerpt, violationCount }
+) {
+  try {
+    await createModerationIncident({
+      id: crypto.randomUUID(),
+      subjectKey: user.moderationSubjectKey,
+      targetDisplay: user.nickname,
+      room: user.room,
+      category: String(category || "Comportement suspect").slice(0, 120),
+      severity,
+      automaticAction,
+      contentSnapshot: String(excerpt || "").slice(0, 500),
+      violationCount: Math.max(1, Number(violationCount) || 1),
+      createdAt: Date.now(),
+    });
+    await broadcastModerationIncidents();
+  } catch (error) {
+    console.error("Erreur incident Sentinelle:", error.message);
+  }
+}
+
+async function handleModerationIncidentAction(socket, moderator, payload) {
+  if (payload.action === "list") {
+    await sendModerationIncidents(socket);
+    return;
+  }
+
+  const statuses = new Map([
+    ["review", "reviewed"],
+    ["dismiss", "dismissed"],
+  ]);
+  const status = statuses.get(String(payload.action || ""));
+  if (!status) return;
+
+  const incident = await getModerationIncidentById(String(payload.id || ""));
+  if (!incident || incident.status !== "open") {
+    emitPrivateSystem(socket, "Cet incident a deja ete verifie ou n'existe plus.");
+    return;
+  }
+
+  await updateModerationIncidentStatus(incident.id, status, moderator.nickname);
+  await recordModerationAction(
+    moderator,
+    status === "reviewed" ? "sentinelle_reviewed" : "sentinelle_dismissed",
+    incident.targetDisplay,
+    `${incident.category} - #${incident.room}`
+  );
+  await broadcastModerationIncidents();
+}
+
 async function sendModerationLogs(socket) {
   socket.emit("moderation-logs", await listModerationLogs(100));
 }
@@ -3555,8 +3635,22 @@ async function handleAutomaticViolation(
   const state = getAutomaticModerationState(user.moderationSubjectKey);
   state.violationTimes.push(Date.now());
   const violationCount = state.violationTimes.length;
+  const willMute = severe || violationCount >= 2;
+  const incidentClassification = classifyModerationIncident({
+    severe,
+    muted: willMute,
+  });
 
-  if (!severe && violationCount < 2) {
+  if (!privateContext) {
+    await recordSentinelleIncident(user, {
+      category: reason,
+      excerpt,
+      violationCount,
+      ...incidentClassification,
+    });
+  }
+
+  if (!willMute) {
     emitModerationFeedback(
       socket,
       `${fallbackMessage} Avertissement : une nouvelle infraction dans les 30 minutes entrainera un mute temporaire.`,
@@ -3608,7 +3702,11 @@ async function handleAutomaticViolation(
       `Motif : ${reason}\n` +
       `Duree : ${formatModerationDuration(duration)}\n` +
       `Salon : #${user.room}\n` +
-      `Extrait : ${String(excerpt || "").slice(0, 240)}\n\n` +
+      `Extrait : ${
+        privateContext
+          ? "Message prive non affiche (visible uniquement s'il est signale)."
+          : String(excerpt || "").slice(0, 240)
+      }\n\n` +
       `Ouvre le centre de moderation : ${PUBLIC_URL || "Tchatelia"}`,
   });
 
